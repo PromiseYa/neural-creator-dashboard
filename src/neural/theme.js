@@ -2,13 +2,15 @@
 import {asset} from '../config';
 
 export const T = {
-  kinds: {core: '#ecd9a6', folder: '#d9b6c1', post: '#c0b8ef', note: '#a9dccb', idea: '#e8c48c', draft: '#a9d3e4', concept: '#e4e6e8', tag: '#98a6a1', ghost: '#70746f', task: '#c3bcf2', decision: '#e8c48c', memory: '#a9d3e4', service: '#7ddc9a'},
+  kinds: {core: '#ecd9a6', folder: '#d9b6c1', post: '#c0b8ef', note: '#8fe0c0', idea: '#e8c48c', draft: '#a9d3e4', concept: '#e4e6e8', tag: '#98a6a1', ghost: '#70746f', task: '#b9b0f5', decision: '#f0c27a', memory: '#9cc8ee', service: '#dfe4ea'},
   modules: {
-    tasks: {color: '#c3bcf2', filter: 'hue-rotate(215deg) saturate(1.1)'},
-    kb: {color: '#ace0cf', filter: 'hue-rotate(118deg) saturate(1)'},
-    decisions: {color: '#ecc98f', filter: 'saturate(1)'},
-    memory: {color: '#acd6e8', filter: 'hue-rotate(158deg) saturate(1.05)'},
-    services: {color: '#e2e5e8', filter: 'hue-rotate(185deg) saturate(.3) brightness(1.15)'}
+    // 每只水母独立染色（同一视频源用 hue/saturate/brightness 拉开）：紫罗兰/青绿/金橙/天蓝/银白；
+    // 触须与卡片连线用同款 color，整组色系一致
+    tasks: {color: '#b9b0f5', filter: 'hue-rotate(215deg) saturate(2.4) brightness(.92)'},
+    kb: {color: '#8fe0c0', filter: 'hue-rotate(130deg) saturate(2.2) brightness(.9)'},
+    decisions: {color: '#f0c27a', filter: 'hue-rotate(-6deg) saturate(2.6) brightness(.98)'},
+    memory: {color: '#9cc8ee', filter: 'hue-rotate(165deg) saturate(2.3) brightness(.92)'},
+    services: {color: '#e4e7ea', filter: 'hue-rotate(185deg) saturate(1.15) brightness(1.12)'}
   },
   media: {orb: asset('media/orb.mp4'), orbPoster: asset('media/orb.jpg'), jelly: asset('media/jellyfish.mp4'), jellyPoster: asset('media/jellyfish.jpg')},
   pulse: {out: ['#fffaf0', '#ecd39e'], in: ['#ffffff', '#e3b3c4']},

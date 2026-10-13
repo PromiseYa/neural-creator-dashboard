@@ -17,6 +17,12 @@ async function alive(url) {
 
 export const STATUS_ZH = {pending: '待办', dispatched: '已派', doing: '进行中', waiting_confirm: '待确认', review: '待复核'};
 
+// WebView2 宿主通知（壁纸模式中文输入的关键）：input 聚焦时让 LivelyMod 播放器把窗口提到前台，
+// 系统输入法（IME）才能挂上、键盘走真实投递（不再走 PostMessage 转发，双字母同根除）；
+// 普通浏览器里 window.chrome.webview 不存在，静默无副作用。
+export const wvFocus = () => { try { window.chrome?.webview?.postMessage('star-input-focus'); } catch {} };
+export const wvBlur = () => { try { window.chrome?.webview?.postMessage('star-input-blur'); } catch {} };
+
 // 一次全量拉取：工作站实体 + KB 现场 + memorycore 状态 + 核心服务探测。
 export async function fetchEcosystem() {
   const [ent, kb, mem] = await Promise.allSettled([

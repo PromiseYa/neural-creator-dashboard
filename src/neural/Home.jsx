@@ -5,6 +5,7 @@ import {NetworkCanvas} from './NetworkCanvas';
 import {Analysis} from './Analysis';
 import {T} from './theme';
 import {CONFIG} from '../config';
+import {wvFocus, wvBlur} from '../data/live';
 import {glowSprite} from './sprites';
 
 const FLIP = {tasks: 1, kb: -1, decisions: -1, memory: 1, services: -1};
@@ -164,7 +165,8 @@ export function targets(L, t) {
     const colX = ox + 158, gap = Math.min(122, (H - 150) / 5);
     MODULES.forEach((m, i) => {
       const sel = m.id === L.mod, k = slotOf(L.mod, m.id);
-      res.jelly[m.id] = {x: colX + (sel ? 16 : 0), y: cy + (k - 2) * gap + swim * 5 * Math.sin(t * .9 + i * 2), s: sel ? 128 : 92, o: sel ? 1 : .6, tilt: swim * 3 * Math.sin(t * .6 + i)};
+      // 慢速左右摇摆漂浮（幅 9px / 周期约 24s，各水母相位错开）；选中的稍向右凸出
+      res.jelly[m.id] = {x: colX + (sel ? 16 : 0) + swim * 9 * Math.sin(t * .26 + i * 1.7), y: cy + (k - 2) * gap + swim * 5 * Math.sin(t * .9 + i * 2), s: sel ? 128 : 92, o: sel ? 1 : .6, tilt: swim * 3 * Math.sin(t * .6 + i)};
     });
     // 伞状条目以右侧分析栏为基准排在它左边约 90px 处（条目最宽约 270px），触须拉长、画面左右均衡；
     // 模块层和打开笔记后位置相同，右侧栏滑入时伞不跳动。
@@ -172,8 +174,10 @@ export function targets(L, t) {
     const panelLeft = W - clamp(W * .30, 360, 440) - 44;
     const n = L.items.length;
     const fgap = 54;
-    const originX = colX + 16 + 128 * .5 + 10 + 168;
-    const fanBase = Math.min(Math.max(panelLeft - 270 - 90, originX + 60), panelLeft - 280);
+    // 扇形第一列贴水母标签右缘约 190px（与其他列 200px 间距一致）：
+    // 旧公式用 panelLeft 反推，宽屏会把清单推得离水母很远（视觉脱节）；详情面板让位交给笔记模式的整组缩放
+    const originX = colX + 16 + 176 + 12;
+    const fanBase = Math.min(originX + 190, panelLeft - 280);
     const selOpen = L.stage === 'note';
     // kb 目录钻取（宽屏）：每一层完整复刻"水母层"语法——选中卡调换到中间放大当该列主角（同选中水母居中），
     // 同层兄弟卡保持原尺寸、变暗排在上下（同未选水母 o=.6；深列放不下才缩），下一层在右侧下一个槽位
@@ -186,7 +190,9 @@ export function targets(L, t) {
     const SX = [fanBase, fanBase + 200, fanBase + 400];
     const fit = !zd || SX[zd] + 270 <= W - 24;
     const span = Math.max(0, n - 1) * fgap;
-    let x = fanBase, y0 = Math.max(cy - span / 2, 150), fg2 = fgap, fsc = 1;
+    // 清单顶部让位：不越过最上方水母（其下方留 70px）——鼠标点水母不被细项卡挡住，触须也更舒展
+    const topJelly = cy - 2 * gap;
+    let x = fanBase, y0 = Math.max(cy - span / 2, topJelly + 70), fg2 = fgap, fsc = 1;
     res.acols = null;
     if (zd && fit) {
       x = SX[zd];
@@ -585,7 +591,7 @@ function Dock({graph, onGo}) {
     <div className="dock-panel glass">
       <div className="dock-kpis">{kpis.map(([k, en, v]) => <div key={k}><span>{k} <em>{en}</em></span><strong>{v}</strong></div>)}</div>
       <form className="ask" onSubmit={e => { e.preventDefault(); ask(q); }}>
-        <input value={q} onChange={e => setQ(e.target.value)} onFocus={() => setAsking(true)} onBlur={() => setAsking(false)} placeholder="问问你的生态图谱… Ask your graph" aria-label="向图谱提问"/>
+        <input value={q} onChange={e => setQ(e.target.value)} onFocus={() => { setAsking(true); wvFocus(); }} onBlur={() => { setAsking(false); wvBlur(); }} placeholder="问问你的生态图谱… Ask your graph" aria-label="向图谱提问"/>
         <button className="send" aria-label="提交问题"><Icon name="send" size={16}/></button>
       </form>
       {asking && <div className="ask-hint">
@@ -824,10 +830,10 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
       <div className="legend-lines"><span><i className="ln mutual"/>双向 <em>Mutual</em></span><span><i className="ln one"/>单向 <em>One-way</em></span></div>
     </div>}
     {stage === 'hub' && <Dock graph={graph} onGo={go}/>}
-    {/* 流水起点：贴着水母环/水母列底部往下一点（矮屏露出几条+渐隐，大屏完整垂到底） */}
+    {/* 流水：hub=水母环下方起；模块/笔记=选中水母正下方一点起，一直垂到屏幕左下；层级在光球之下（文字不压光球） */}
     <EcoStream events={ecoEvents} top={stage === 'hub'
       ? Math.round(size.h * .53 + Math.min(size.h * .32, 262) + 48)
-      : Math.round(size.h * .53 + 2 * Math.min(122, (size.h - 150) / 5) + 66)}/>
+      : Math.round(size.h * .53 + 96)}/>
     {/* 宽屏 kb 钻取时层级轨迹已由画布上的横排胶囊承担，这里只在窄屏显示，避免两套面包屑重复 */}
     {zoneChain && stage === 'module' && size.w < 760 && <div className="zone-trail" aria-label="层级轨迹">
       {zoneChain.map((c, i) => (

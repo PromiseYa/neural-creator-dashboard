@@ -2,6 +2,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {KINDS, CONTENT, MODULES, neighbors, latent, askGraph, LINK_KINDS, LINK_EN, STATUS_ZH, PRIO_ZH} from './graph';
 import {Icon} from './icons';
 import {stripFrontmatter, firstImage} from './markdown';
+import {wvFocus, wvBlur} from '../data/live';
 
 const fmt = (v, d = 0) => v == null || Number.isNaN(v) ? '—' : Number(v).toLocaleString('zh-CN', {minimumFractionDigits: d, maximumFractionDigits: d});
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -126,7 +127,7 @@ function AskBox({graph, node, onGo}) {
       {c.items?.length > 0 && <div className="chip-row">{c.items.slice(0, 6).map(id => <Chip key={id} graph={graph} id={id} onGo={onGo}/>)}</div>}
     </div>)}</div>}
     <form onSubmit={e => { e.preventDefault(); if (q.trim()) setRes(askGraph(graph, q, node.id)); }}>
-      <input value={q} onChange={e => setQ(e.target.value)} onFocus={() => setAsking(true)} onBlur={() => setAsking(false)} placeholder="追问这条内容… Ask about this note" aria-label="追问这条内容"/>
+      <input value={q} onChange={e => setQ(e.target.value)} onFocus={() => { setAsking(true); wvFocus(); }} onBlur={() => { setAsking(false); wvBlur(); }} placeholder="追问这条内容… Ask about this note" aria-label="追问这条内容"/>
       <button aria-label="提交"><Icon name="send" size={15}/></button>
     </form>
     <div className="an-ask-chips">
@@ -464,14 +465,14 @@ export function Analysis({graph, node, module, onGo, onAction, onClose}) {
         <h3>编辑 <em>Edit</em></h3>
         <div className="task-edit">
           {editing?.note !== undefined ? <>
-            <textarea value={editing.note} rows={4} placeholder="补充说明/处理结果写这里…" onChange={e => setEditing({note: e.target.value})} aria-label="编辑备注"/>
+            <textarea value={editing.note} rows={4} placeholder="补充说明/处理结果写这里…" onChange={e => setEditing({note: e.target.value})} onFocus={wvFocus} onBlur={wvBlur} aria-label="编辑备注"/>
             <div className="te-actions">
               <button className="primary" onClick={() => { onAction({type: 'taskOp', id: node.task?.id, op: 'note', note: editing.note}); setEditing(null); }}>保存备注 <em>Save</em></button>
               <button onClick={() => setEditing(null)}>取消</button>
             </div>
           </> : <button className="ghost te-btn" onClick={() => setEditing({note: detail?.task?.notes || ''})}>✎ 改备注 <em>Note</em></button>}
           {editing?.due !== undefined ? <>
-            <input type="date" value={editing.due} onChange={e => setEditing({due: e.target.value})} aria-label="选择截止日期"/>
+            <input type="date" value={editing.due} onChange={e => setEditing({due: e.target.value})} onFocus={wvFocus} onBlur={wvBlur} aria-label="选择截止日期"/>
             <div className="te-actions">
               <button className="primary" onClick={() => { onAction({type: 'taskOp', id: node.task?.id, op: 'due', due: editing.due || ''}); setEditing(null); }}>保存截止 <em>Save</em></button>
               <button onClick={() => { onAction({type: 'taskOp', id: node.task?.id, op: 'due', due: ''}); setEditing(null); }}>清除</button>
