@@ -123,12 +123,12 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 /* 状态徽章：卡右侧分色小胶囊（任务六状态/服务在线离线/拍板待拍已结/记忆日期），色由 --b 注入 */
 .fi-badge { flex: none; margin-left: -2px; padding: 1.5px 7px; border-radius: 999px; font-size: 9.5px; line-height: 1.5; letter-spacing: .02em; color: var(--b); border: 1px solid color-mix(in srgb, var(--b) 45%, transparent); background: color-mix(in srgb, var(--b) 12%, transparent); white-space: nowrap; text-shadow: 0 0 8px color-mix(in srgb, var(--b) 30%, transparent); }
 .fan-item.mini .fi-badge { transform: scale(.92); transform-origin: right center; }
-/* —— 任务状态切换：悬停后按"下一层连线"语法展开——五条发光触须各自连出一张状态小卡 —— */
+/* —— 任务状态切换：悬停徽章在右侧垂直依次弹出五张状态小卡（同层别清单语法），移开 2 秒渐隐 —— */
 .st-swap { position: relative; display: inline-flex; }
-.st-line { position: absolute; left: 100%; top: 50%; width: var(--len); height: 1.4px; border-radius: 2px; transform-origin: 0 50%; transform: rotate(var(--ang)) scaleX(0); background: linear-gradient(90deg, color-mix(in srgb, var(--b) 75%, transparent), color-mix(in srgb, var(--b) 22%, transparent)); box-shadow: 0 0 7px color-mix(in srgb, var(--b) 40%, transparent); transition: transform .32s cubic-bezier(.2, .8, .2, 1); pointer-events: none; }
-.st-swap:hover .st-line, .st-swap:focus-within .st-line { transform: rotate(var(--ang)) scaleX(1); transition-delay: calc(var(--d) * 38ms); }
-.st-node { position: absolute; transform: translate(-6px, -50%) scale(.5); opacity: 0; font-size: 10.5px; line-height: 1.6; padding: 2.5px 11px; border-radius: 999px 6px 6px 999px; border: 1px solid color-mix(in srgb, var(--b) 45%, transparent); background: rgba(13, 14, 14, .92); color: var(--b); white-space: nowrap; cursor: pointer; backdrop-filter: blur(6px); box-shadow: 0 2px 10px rgba(0, 0, 0, .4); transition: transform .28s cubic-bezier(.2, .8, .2, 1), opacity .2s; z-index: 30; }
-.st-swap:hover .st-node, .st-swap:focus-within .st-node { transform: translate(0, -50%) scale(1); opacity: 1; transition-delay: calc(60ms + var(--d) * 45ms); }
+.st-line { position: absolute; left: 100%; top: 50%; width: var(--len); height: 1.4px; border-radius: 2px; transform-origin: 0 50%; transform: rotate(var(--ang)) scaleX(0); background: linear-gradient(90deg, color-mix(in srgb, var(--b) 75%, transparent), color-mix(in srgb, var(--b) 22%, transparent)); box-shadow: 0 0 7px color-mix(in srgb, var(--b) 40%, transparent); transition: transform .38s cubic-bezier(.2, .8, .2, 1), opacity .3s; opacity: 0; pointer-events: none; }
+.st-swap.open .st-line { transform: rotate(var(--ang)) scaleX(1); opacity: 1; transition-delay: calc(var(--d) * 55ms); }
+.st-node { position: absolute; transform: translate(-8px, -50%) scale(.55); opacity: 0; font-size: 10.5px; line-height: 1.6; padding: 2.5px 12px; border-radius: 999px 7px 7px 999px; border: 1px solid color-mix(in srgb, var(--b) 45%, transparent); background: rgba(13, 14, 14, .92); color: var(--b); white-space: nowrap; cursor: pointer; backdrop-filter: blur(6px); box-shadow: 0 2px 10px rgba(0, 0, 0, .4); transition: transform .3s cubic-bezier(.2, .8, .2, 1), opacity .32s; z-index: 30; }
+.st-swap.open .st-node { transform: translate(0, -50%) scale(1); opacity: 1; transition-delay: calc(90ms + var(--d) * 60ms); }
 .st-node:not(.cur):hover { background: color-mix(in srgb, var(--b) 20%, rgba(13, 14, 14, .92)); box-shadow: 0 0 14px color-mix(in srgb, var(--b) 35%, transparent); }
 .st-node.cur { opacity: .55; cursor: default; }
 /* —— 光球可点击回主页（与左上品牌同效） —— */
@@ -141,7 +141,7 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .hub-copy { position: absolute; left: 40px; top: 104px; max-width: 360px; transition: opacity .6s, transform .6s; animation: introFade 1.2s .5s both; pointer-events: none; }
 .stage-module .hub-copy, .stage-note .hub-copy { opacity: 0; transform: translateY(-10px); }
 /* —— 生态流水（左侧竖条，全视图固定）：无边框无底色，左上文案下方垂到屏幕底，面板可滚、底部渐隐 —— */
-.ecostream { position: absolute; left: 44px; bottom: 0; width: 250px; z-index: 1; display: flex; flex-direction: column; animation: introFade 1s 2s both; pointer-events: none; }
+.ecostream { position: absolute; left: 44px; bottom: 0; width: 330px; z-index: 1; display: flex; flex-direction: column; animation: introFade 1s 2s both; pointer-events: none; }
 .intro-done .ecostream { animation-delay: 0s; animation-duration: .5s; }
 .ecostream h3 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 6px; font-size: 10.5px; letter-spacing: .14em; color: var(--text-2); font-weight: 600; }
 .ecostream h3 em { font-weight: 400; letter-spacing: .08em; }
@@ -155,8 +155,8 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .eco-ts { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
 /* 单行文字尽量完整显示，放不下的尾部向右模糊虚化隐去（不再省略号硬截断） */
 .eco-txt { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip;
-  -webkit-mask-image: linear-gradient(90deg, #000 80%, rgba(0, 0, 0, .35) 94%, transparent 100%);
-  mask-image: linear-gradient(90deg, #000 80%, rgba(0, 0, 0, .35) 94%, transparent 100%); }
+  -webkit-mask-image: linear-gradient(90deg, #000 88%, rgba(0, 0, 0, .3) 97%, transparent 100%);
+  mask-image: linear-gradient(90deg, #000 88%, rgba(0, 0, 0, .3) 97%, transparent 100%); }
 .eco-item.fresh .eco-txt { color: #e6cf98; text-shadow: 0 0 10px rgba(230, 207, 152, .45); }
 .eco-item.fresh i { animation: ecoPulse 1.6s ease-in-out infinite; }
 @keyframes ecoPulse { 50% { transform: scale(1.7); } }

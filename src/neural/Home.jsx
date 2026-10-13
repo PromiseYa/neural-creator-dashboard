@@ -14,6 +14,44 @@ export const MOD_STYLE = Object.fromEntries(Object.entries(T.modules).map(([id, 
 export const split = n => ({out: n.out - n.mutual, back: n.in - n.mutual, both: n.mutual});
 const fmt = v => v == null ? '—' : Number(v).toLocaleString('zh-CN');
 
+// 任务状态快捷切换：悬停徽章 → 五张状态小卡在右侧垂直依次弹出（同"下一层清单"语法，逐个生长）；
+// 鼠标移开 2 秒后才逐渐收起（有空隙可穿行），悬停期间锁定不消失；点选直接切换状态。
+class TaskStatusFan extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = {open: false};
+    this.timer = null;
+  }
+  componentWillUnmount() { clearTimeout(this.timer); }
+  enter = () => { clearTimeout(this.timer); this.setState({open: true}); };
+  leave = () => {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.setState({open: false}), 2000);
+  };
+  render() {
+    const {badge, task, onAction} = this.props;
+    return <span className={`st-swap${this.state.open ? ' open' : ''}`} onClick={e => e.stopPropagation()} onPointerEnter={this.enter} onPointerLeave={this.leave}>
+      <span className="fi-badge" style={{'--b': badge.color}}>{badge.text}</span>
+      {TASK_OPS.map(([zh, target, op], k) => {
+        const cur = task?.status === target;
+        const dy = (k - 2) * 28;                                  // 从上往下垂直排开（同层别清单）
+        const dx = 58;
+        const rad = Math.atan2(dy, dx);
+        const len = Math.round(Math.hypot(dx, dy));
+        return <React.Fragment key={target}>
+          <span className="st-line" style={{'--b': ST_COLOR[target], '--ang': rad + 'rad', '--len': len + 'px', '--d': k}}/>
+          <span role="button" tabIndex={cur ? -1 : 0} aria-disabled={cur}
+            className={`st-node${cur ? ' cur' : ''}`} style={{'--b': ST_COLOR[target], '--d': k, left: `calc(100% + ${dx - 6}px)`, top: `calc(50% + ${dy}px)`}}
+            onClick={ev => { ev.stopPropagation(); if (!cur) onAction({type: 'taskOp', id: task?.id, op}); }}
+            onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); if (!cur) onAction({type: 'taskOp', id: task?.id, op}); } }}>
+            {cur ? '✓ ' : ''}{zh}
+          </span>
+        </React.Fragment>;
+      })}
+    </span>;
+  }
+}
+
 // 生态流水（左侧竖条）：从水母列/水母环下方一点垂到屏幕底部，越往下越虚无（mask 渐隐）；
 // 无边框无底色，行样式参考右上图例（小圆点+文字）；30 秒轮询，新到事件金色高亮。
 const ACT_COLOR = {dispatch: '#a9d3e4', task: '#c3bcf2', decide: '#e8c48c', decision: '#e8c48c', alarm: '#ff7385', cmd: '#7ddc9a', event: '#98a6a1'};
@@ -156,7 +194,7 @@ function itemMeta(n) {
   const d = split(n);
   switch (n.kind) {
     case 'folder': return [[n.unit || (n.online != null ? '服务' : '篇数'), n.unit ? '' : (n.online != null ? 'Services' : 'Notes'), n.count || 0], n.online != null ? ['在线', 'Online', n.online] : ['', '', ''], ['', '', '']];
-    case 'task': return [[STATUS_ZH[n.task?.status] || n.task?.status || '—', '', ''], [PRIO_ZH[n.task?.priority] || n.task?.priority || '—', '', ''], ['↔', '', d.both]];
+    case 'task': return [[PRIO_ZH[n.task?.priority] || n.task?.priority || '—', '', ''], ['↔', '', d.both]];
     case 'note': return [['出链', 'Out', d.out], ['反链', 'In', d.back], ['↔', '', d.both]];
     case 'decision': return [[n.decision?.status || '—', '', ''], [String(n.decision?.created_at || '').slice(5, 10) || '—', '', ''], ['↔', '', d.both]];
     case 'memory': return [[n.updated ? `更新 ${String(n.updated).slice(5)}` : '记忆池', '', ''], ['↔', '', d.both], ['', '', '']];
@@ -590,30 +628,8 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           <span className="fi-title">{n.short || n.title}</span>
           <span className="fi-meta">{meta.map(([k, en, v], j) => <span key={j} className={k === '↔' ? 'mutual' : ''}>{k}{en && <em>{en}</em>} {v !== '' && <b>{v}</b>}</span>)}</span>
         </span>
-        {n.kind === 'task' && bd ? (
-          // 状态徽章悬停后按"下一层连线"语法展开：五条发光触须各自连出一张状态小卡，
-          // 右向弧形张开（-24°~+24°），不与上下任务卡重叠；卡片本身是 button，内部用 span role=button 防嵌套
-          <span className="st-swap" onClick={e => e.stopPropagation()}>
-            <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>
-            {TASK_OPS.map(([zh, target, op], k) => {
-              const cur = n.task?.status === target;
-              const ang = -44 + k * 22;                      // -44° ~ +44°：节点垂直错开 ≥24px 不叠卡
-              const rad = ang * Math.PI / 180;
-              const len = 58 + Math.abs(k - 2) * 7;          // 弧形：中间短两侧长
-              const ex = Math.round(Math.cos(rad) * len), ey = Math.round(Math.sin(rad) * len);
-              const fire = () => { if (!cur) onAction({type: 'taskOp', id: n.task?.id, op}); };
-              return <React.Fragment key={target}>
-                <span className="st-line" style={{'--b': ST_COLOR[target], '--ang': rad + 'rad', '--len': len + 'px', '--d': k}}/>
-                <span role="button" tabIndex={cur ? -1 : 0} aria-disabled={cur}
-                  className={`st-node${cur ? ' cur' : ''}`} style={{'--b': ST_COLOR[target], '--d': k, left: `calc(100% + ${ex - 4}px)`, top: `calc(50% + ${ey}px)`}}
-                  onClick={ev => { ev.stopPropagation(); fire(); }}
-                  onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); fire(); } }}>
-                  {cur ? '✓ ' : ''}{zh}
-                </span>
-              </React.Fragment>;
-            })}
-          </span>
-        ) : bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}
+        {n.kind === 'task' && bd ? <TaskStatusFan badge={bd} task={n.task} onAction={onAction}/>
+          : bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}
       </button>;
     })}
   </div>;
