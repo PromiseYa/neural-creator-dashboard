@@ -1,6 +1,7 @@
 import React, {useEffect, useRef} from 'react';
 import {KINDS} from './graph';
 import {T} from './theme';
+import {glowSprite, orbSprite} from './sprites';
 
 const P = T.canvas;
 const ADD = P.additive ? 'lighter' : 'source-over';
@@ -33,8 +34,23 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
       r: n.kind === 'folder' ? 3.2 : n.kind === 'tag' ? 1.6 : n.kind === 'concept' ? 2.4 : n.kind === 'ghost' ? 2 : 2.2 + Math.min(n.deg, 14) * .22
     }));
     const byId = new Map(nodes.map(x => [x.n.id, x]));
-    const links = graph.links.filter(l => byId.has(l.a) && byId.has(l.b)).map((l, i) => ({l, A: byId.get(l.a), B: byId.get(l.b), seed: (i * 7919 % 997) / 997}));
+    // 骨架化渲染：目录归属线（contain）只在布局里起作用，画布上不画——背景只留双链/话题脉络。
+    const links = graph.links.filter(l => l.kind !== 'contain' && byId.has(l.a) && byId.has(l.b)).map((l, i) => ({l, A: byId.get(l.a), B: byId.get(l.b), seed: (i * 7919 % 997) / 997}));
     const sparks = Array.from({length: 90}, (_, i) => ({a: i / 90 * Math.PI * 2 + Math.sin(i * 12.9) * .3, v: .35 + (i * 37 % 100) / 100, s: 1 + (i * 13 % 7) / 3}));
+
+    // 标签收纳：默认只画目录锚点名；hover 某类时只补该类连接度前 12 的节点名，明细一律进水母面板看。
+    const labelDefault = new Set(graph.nodes.filter(n => n.kind === 'folder').map(n => n.id));
+    const hoverLabels = new Map();
+    for (const n of graph.nodes) {
+      if (!hoverLabels.has(n.kind)) hoverLabels.set(n.kind, []);
+      hoverLabels.get(n.kind).push(n);
+    }
+    for (const [kind, list] of hoverLabels) {
+      hoverLabels.set(kind, new Set(list.sort((a, b) => (b.deg + b.mutual) - (a.deg + a.mutual)).slice(0, 12).map(n => n.id)));
+    }
+
+    // hover 高亮集合只在悬停对象变化时重建，不再每帧重算
+    let hlKey = null, hl = null, hlLabel = null;
 
     const draw = now => {
       const L = live.current;
@@ -44,8 +60,12 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
       const cx = L.orb.x, cy = L.orb.y;
       const sc = (L.orb.s / 440) * Math.min(W * .37 / 380, H * .36 / 300) * (L.stage === 'hub' ? 1 : .55);
       const hover = L.hover;
-      const hl = hover ? new Set(graph.nodes.filter(n => n.kind === hover).map(n => n.id)) : null;
-      if (hl) for (const l of graph.links) { if (hl.has(l.a) && l.kind !== 'contain') hl.add(l.b); }
+      if (hover !== hlKey) {
+        hlKey = hover;
+        hl = hover ? new Set(graph.nodes.filter(n => n.kind === hover).map(n => n.id)) : null;
+        if (hl) for (const l of graph.links) { if (hl.has(l.a) && l.kind !== 'contain') hl.add(l.b); }
+        hlLabel = hover ? (hoverLabels.get(hover) || null) : null;
+      }
       const grow = reduced ? 1 : Math.min(1, Math.max(0, (t - .35) / 2.2));
       const prog = x => reduced ? 1 : Math.min(1, Math.max(0, (t - .4 - x.d * .32 - x.seed * .35) / .9));
       const pos = x => {
@@ -67,7 +87,7 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
           g.addColorStop(0, `rgba(${P.spark[0]},0)`); g.addColorStop(1, `rgba(${P.spark[1]},${a})`);
           ctx.strokeStyle = g; ctx.lineWidth = s.s;
           ctx.beginPath(); ctx.moveTo(cx + Math.cos(s.a) * d * .6, cy + Math.sin(s.a) * d * .6); ctx.lineTo(x, y); ctx.stroke();
-          ctx.fillStyle = `rgba(${P.spark[2]},${a})`; ctx.beginPath(); ctx.arc(x, y, s.s * .9, 0, 7); ctx.fill();
+          ctx.globalAlpha = a; ctx.drawImage(glowSprite(P.spark[2]), x - s.s, y - s.s, s.s * 2, s.s * 2); ctx.globalAlpha = 1;
         }
         ctx.globalCompositeOperation = 'source-over';
       }
@@ -102,10 +122,8 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
             let x = x1 + (x2 - x1) * u, y = y1 + (y2 - y1) * u;
             if (k.l.both) { const mx = (k.A.s[0] + k.B.s[0]) / 2 + (k.B.s[1] - k.A.s[1]) * .12, my = (k.A.s[1] + k.B.s[1]) / 2 - (k.B.s[0] - k.A.s[0]) * .12; const uu = fwd ? u : 1 - u; x = (1 - uu) ** 2 * k.A.s[0] + 2 * (1 - uu) * uu * mx + uu * uu * k.B.s[0]; y = (1 - uu) ** 2 * k.A.s[1] + 2 * (1 - uu) * uu * my + uu * uu * k.B.s[1]; }
             const a = Math.sin(u * Math.PI) * (on ? .95 : .2);
-            const g = ctx.createRadialGradient(x, y, 0, x, y, 6);
             const c = k.l.both ? (lane ? P.mutualIn : P.mutual) : P.pulseOne;
-            g.addColorStop(0, `rgba(${c},${a})`); g.addColorStop(1, `rgba(${c},0)`);
-            ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 6, 0, 7); ctx.fill();
+            ctx.globalAlpha = a; ctx.drawImage(glowSprite(c), x - 6, y - 6, 12, 12); ctx.globalAlpha = 1;
           }
         }
         ctx.globalCompositeOperation = 'source-over';
@@ -119,17 +137,17 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         const color = KINDS[x.n.kind].color;
         const a = p * (on ? 1 : .22);
         const r = x.r * (hl && on ? 1.35 : 1);
-        ctx.globalAlpha = a;
+        ctx.globalAlpha = a * .4; // 与原 P.glow（'#..66' ≈ 0.4）等效
         ctx.globalCompositeOperation = ADD;
-        const g = ctx.createRadialGradient(px, py, 0, px, py, r * 5);
-        g.addColorStop(0, color + P.glow); g.addColorStop(1, color + '00');
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, r * 5, 0, 7); ctx.fill();
+        const GR = r * 5;
+        ctx.drawImage(glowSprite(color), px - GR, py - GR, GR * 2, GR * 2);
         ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = a;
         if (x.n.kind === 'ghost') { ctx.setLineDash([2, 2]); ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(px, py, r + 1, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
-        else { const b = ctx.createRadialGradient(px - r * .35, py - r * .35, 0, px, py, r); b.addColorStop(0, P.light); b.addColorStop(.45, color); b.addColorStop(1, color + 'aa'); ctx.fillStyle = b; ctx.beginPath(); ctx.arc(px, py, r, 0, 7); ctx.fill(); }
-        if (L.stage === 'hub' && p > .9 && (hl ? on && x.n.kind !== 'tag' : x.n.kind === 'concept')) {
-          ctx.globalAlpha = a * (hl ? .9 : .42);
-          ctx.fillStyle = P.label; ctx.font = `${hl ? 11 : 10}px -apple-system, "PingFang SC", sans-serif`;
+        else ctx.drawImage(orbSprite(color, P.light), px - r, py - r, r * 2, r * 2);
+        if (L.stage === 'hub' && p > .9 && (x.n.kind === 'folder' || (hlLabel && hlLabel.has(x.n.id) && on))) {
+          ctx.globalAlpha = a * (x.n.kind === 'folder' ? .85 : .8);
+          ctx.fillStyle = P.label; ctx.font = `${x.n.kind === 'folder' ? 11.5 : 10.5}px -apple-system, "PingFang SC", sans-serif`;
           ctx.fillText((x.n.short || x.n.title).slice(0, 14), px + r + 5, py + 3.5);
         }
         ctx.globalAlpha = 1;

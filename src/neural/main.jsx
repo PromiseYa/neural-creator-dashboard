@@ -1,23 +1,15 @@
-import React, {useCallback, useDeferredValue, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {seedIdeas, seedDrafts, snapshot} from '../data';
-import {posts, monthPosts} from './works';
+import {fetchEcosystem, taskAction, decideAction} from '../data/live';
 import {CONFIG, asset} from '../config';
 import {buildGraph, forceLayout, stats, KINDS} from './graph';
+import {renderMarkdown, stripFrontmatter} from './markdown';
 import {Home} from './Home';
-import {Library, Drafts, Ideas} from './pages';
 import {Count} from './Analysis';
 import {Icon} from './icons';
-import {T} from './theme';
 import './neural.css';
 
-// 选题、草稿与目标保存在当前浏览器（localStorage）。
-function useSaved(key, fallback) {
-  const [v, set] = useState(() => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } });
-  useEffect(() => { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }, [key, v]);
-  return [v, set];
-}
-
+// 生态星图：数据来自工作站实体(8331)+KB 现场扫描+服务探测，30 秒轮询刷新。
 function Modal({title, en, onClose, children, wide}) {
   const ref = useRef(null), closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -34,7 +26,7 @@ function Modal({title, en, onClose, children, wide}) {
       }
     };
     window.addEventListener('keydown', key);
-    return () => { window.removeEventListener('keydown', key); if (before?.isConnected) before.focus({preventScroll: true}); };
+    return () => { window.removeEventListener('keydown', key); if (before?.isConnected) before.focus(); };
   }, []);
   return <div className="veil" onClick={onClose}>
     <section ref={ref} tabIndex={-1} className={`modal glass ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} onClick={e => e.stopPropagation()}>
@@ -44,168 +36,173 @@ function Modal({title, en, onClose, children, wide}) {
   </div>;
 }
 
-const navs = [['home', '工作台', 'Workspace'], ['library', '作品库', 'Works'], ['drafts', '创作台', 'Drafts'], ['ideas', '选题池', 'Ideas']];
-const initialPage = () => { const h = location.hash.slice(1); return navs.some(n => n[0] === h) ? h : 'home'; };
+// 阅读全文（R21）：按需拉 /api/note-raw 全文，本地轻量渲染（markdown.js）；
+// [[双链]] 渲染成按钮，点击在星图内跳到那篇笔记（按标题/文件名匹配，找不到关弹窗回星图）。
+function Reader({node, graph, onJump, onClose}) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let stop = false;
+    setData(null);
+    setErr(false);
+    const nid = node.path || String(node.id).replace(/^note:/, '');   // 图谱 id 带 note: 前缀，接口要 KB 相对路径
+    fetch(`/api/note-raw?id=${encodeURIComponent(nid)}`)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(r.status)))
+      .then(d => { if (!stop && d?.ok) setData(d); else if (!stop) setErr(true); })
+      .catch(() => { if (!stop) setErr(true); });
+    return () => { stop = true; };
+  }, [node.id]);
 
-function Snapshot({goal, onGoal, ideas, drafts, onIdea, onDraft, onLibrary}) {
-  const total = posts.reduce((s, p) => s + p.views, 0);
-  const stats4 = [['已发布笔记', 'Published', posts.length], ['账号粉丝', 'Followers', snapshot.followers], ['累计观看', 'Total views', total], ['已知笔记涨粉', 'Known follows', posts.reduce((s, p) => s + (p.follows ?? 0), 0)]];
-  const max = Math.max(...posts.map(p => p.views));
-  return <section className="snapshot" aria-label="账号数据快照">
-    <div className="snapshot-head"><p className="eyebrow">SNAPSHOT <span>账号快照</span></p><p className="quiet">{snapshot.source} · {snapshot.capturedAt} <em>Sample data</em></p></div>
-    <div className="kpi-band glass">{stats4.map(([zh, en, v]) => <div key={zh}><span>{zh} <em>{en}</em></span><strong><Count value={v}/></strong></div>)}</div>
-    <div className="snapshot-grid">
-      <section className="glass card perf">
-        <header><h2>作品表现 <em>Performance</em></h2><button className="text-btn" onClick={onLibrary}>全部作品 <em>All works</em><Icon name="arrow" size={14}/></button></header>
-        <table><thead><tr><th>笔记 <em>Note</em></th><th>观看 <em>Views</em></th><th>收藏 <em>Saves</em></th><th>涨粉 <em>Follows</em></th></tr></thead>
-          <tbody>{[...posts].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6).map(p => <tr key={p.id} onClick={() => onLibrary(p.id)}><td><span className="t-title">{p.title}</span><span className="t-bar"><i style={{'--w': p.views / max}}/></span></td><td>{p.views.toLocaleString('zh-CN')}</td><td>{p.saves}</td><td>{p.follows ?? '—'}</td></tr>)}</tbody></table>
-        <p className="quiet">最近 6 篇 · 共 {posts.length} 篇 · 缺失数据保留为「—」<em>Latest 6 of {posts.length}</em></p>
-      </section>
-      <section className="glass card plan">
-        <header><h2>创作计划 <em>Plan</em></h2></header>
-        <div className="plan-body">
-          <button className="ring" onClick={onGoal} aria-label={`修改目标，本月 ${monthPosts.length} 篇，目标 ${goal} 篇`}>
-            <svg viewBox="0 0 180 180"><defs><linearGradient id="ring-g" x1="0" x2="1"><stop offset="0" stopColor={T.ring[0]}/><stop offset="1" stopColor={T.ring[1]}/></linearGradient></defs><circle cx="90" cy="90" r="72" className="track"/><circle cx="90" cy="90" r="72" className="value" strokeDasharray={`${Math.min(monthPosts.length / goal, 1) * 452.39} 452.39`}/></svg>
-            <span><strong>{monthPosts.length}</strong>/{goal}<small>本月目标 Goal</small></span>
-          </button>
-          <div className="plan-ideas"><h3>下一篇写什么 <em>Up next</em></h3>{ideas.slice(0, 3).map((idea, i) => <button key={idea.id} onClick={() => onIdea(idea)}><b>{i + 1}</b><span>{idea.title}</span></button>)}</div>
-        </div>
-        <button className="plan-draft" onClick={() => onDraft(drafts[0]?.id)}><Icon name="draft" size={15}/>继续创作 <em>Continue</em><span>{drafts[0]?.title || '开始第一篇草稿'}</span><Icon name="arrow" size={15}/></button>
-      </section>
+  const {meta, body} = useMemo(() => data ? stripFrontmatter(data.raw) : {meta: {}, body: ''}, [data]);
+  const rendered = useMemo(() => data ? renderMarkdown(body, data.dir) : null, [data, body]);
+  const tags = useMemo(() => String(meta.tags || '').replace(/^\[|\]$/g, '').split(/[,，]/).map(s => s.trim()).filter(Boolean), [meta]);
+
+  const jump = e => {
+    const b = e.target.closest?.('[data-wiki]');
+    if (!b) return;
+    const want = b.dataset.wiki;
+    const n = graph.nodes.find(x => x.kind === 'note' && (x.title === want || String(x.path || '').endsWith(want + '.md')));
+    if (n) onJump(n.id);
+    else onClose();
+  };
+
+  return <Modal title={node.short || node.title} en={KINDS[node.kind].en} onClose={onClose} wide>
+    <div className="reader" onClick={jump}>
+      <p className="md-meta">
+        <span className="quiet">{node.path}</span>
+        {meta.updated && <span className="chip static mini">更新 {meta.updated}</span>}
+        {meta.created && <span className="chip static mini">建于 {meta.created}</span>}
+        {data && <span className="chip static mini">{body.replace(/\s/g, '').length} 字</span>}
+        {rendered?.images > 0 && <span className="chip static mini">{rendered.images} 图</span>}
+        {tags.map(t => <span key={t} className="chip static mini tag">#{t}</span>)}
+      </p>
+      {err && <p className="quiet">全文读取失败（本地文件不可达）。</p>}
+      {!data && !err && <p className="quiet">读取全文…</p>}
+      {rendered && <article className="reader-md" dangerouslySetInnerHTML={{__html: rendered.html}}/>}
     </div>
-  </section>;
+  </Modal>;
 }
 
 function App() {
-  const [page, setPage] = useState(initialPage);
-  const [goal, setGoal] = useSaved(CONFIG.storagePrefix + '-goal-v1', 8);
-  const [ideas, setIdeas] = useSaved(CONFIG.storagePrefix + '-ideas-v1', seedIdeas);
-  const [drafts, setDrafts] = useSaved(CONFIG.storagePrefix + '-drafts-v1', seedDrafts);
-  const [active, setActive] = useState(() => drafts[0]?.id);
   const [focus, setFocus] = useState({mod: null, sel: null});
-  const [libSel, setLibSel] = useState(posts[1].id);
   const [modal, setModal] = useState(null);
-  const [editing, setEditing] = useState(null);
-  const [goalInput, setGoalInput] = useState(String(goal));
+  const [readNode, setReadNode] = useState(null);
   const [toast, setToast] = useState('');
+  const [eco, setEco] = useState(null);
+  const [deciding, setDeciding] = useState(null);   // 待确认的拍板动作（弹窗替代原生 confirm，内嵌浏览器里原生框不渲染）
   const reduced = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
-  const slowDrafts = useDeferredValue(drafts);
-  const graph = useMemo(() => buildGraph({ideas, drafts: slowDrafts}), [ideas, slowDrafts]);
-  const layout = useMemo(() => forceLayout(graph), [graph]);
 
-  useEffect(() => { history.replaceState(null, '', page === 'home' ? location.pathname : '#' + page); window.scrollTo({top: 0}); }, [page]);
+  const pullRef = useRef(null);
+  useEffect(() => {
+    let stop = false;
+    const pull = async () => {
+      try {
+        const e = await fetchEcosystem();
+        if (!stop) setEco(e);
+      } catch { /* 单次失败保静默，下轮再试 */ }
+    };
+    pullRef.current = pull;
+    pull();
+    const iv = setInterval(pull, 30000);
+    return () => { stop = true; clearInterval(iv); };
+  }, []);
+
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 2800); return () => clearTimeout(t); }, [toast]);
 
   const close = useCallback(() => setModal(null), []);
-  function newDraft(title = '未命名草稿', body = '', source) {
-    const id = 'draft-' + Date.now();
-    setDrafts(d => [{id, title, body, source}, ...d]);
-    setActive(id); setPage('drafts'); setModal(null);
-    setToast('草稿已创建，只保存在此浏览器 · Draft saved locally');
-  }
-  function editIdea(idea) { setEditing({...idea}); setModal('idea'); }
-  function saveIdea() {
-    if (!editing.title.trim()) return;
-    setIdeas(ideas.some(i => i.id === editing.id) ? ideas.map(i => i.id === editing.id ? editing : i) : [...ideas, editing]);
-    setModal(null); setToast('选题已保存 · Idea saved');
-  }
-  function toDraft(idea) {
-    const existing = drafts.find(d => d.source === idea.id);
-    if (existing) { setActive(existing.id); setPage('drafts'); setModal(null); setToast('已打开关联草稿 · Linked draft opened'); return; }
-    const item = {...idea, status: '已转草稿'};
-    setIdeas(ideas.some(i => i.id === item.id) ? ideas.map(i => i.id === item.id ? item : i) : [...ideas, item]);
-    newDraft(item.title, `【根据选题创建的写作提纲，未调用 AI】\n\n创作方向：${item.note}\n\n开场：\n\n核心观点：\n\n操作示例：\n\n结尾：`, item.id);
-  }
-  function deleteDraft(id) {
-    const d = drafts.find(x => x.id === id);
-    if (!window.confirm(`删除草稿「${d?.title || '未命名草稿'}」？此操作只影响当前浏览器。`)) return;
-    const rest = drafts.filter(x => x.id !== id);
-    setDrafts(rest); setActive(rest[0]?.id); setToast('草稿已删除 · Draft deleted');
-  }
-  const onAction = useCallback(a => {
-    if (a.type === 'page') { if (a.page === 'library') setLibSel(a.id); if (a.page === 'drafts') setActive(a.id); setPage(a.page); }
-    if (a.type === 'read') setModal({read: graph.index.get(a.id)});
-    if (a.type === 'editIdea') editIdea(a.idea);
-    if (a.type === 'ideaToDraft') toDraft(a.idea);
-  }, [graph, drafts, ideas]); // eslint-disable-line react-hooks/exhaustive-deps
-  const openInGraph = id => { const n = graph.index.get(id); const mod = {post: 'works', note: 'methods', idea: 'ideas', draft: 'drafts', concept: 'concepts'}[n?.kind]; if (mod) { setFocus({mod, sel: id}); setPage('home'); } };
+  const graph = useMemo(() => buildGraph(eco || {}), [eco]);
+  const layout = useMemo(() => forceLayout(graph), [graph]);
   const s = stats(graph);
+  const v = eco?.vitals;
 
-  return <div className={`neural page-${page}`}>
+  const openInGraph = id => {
+    const n = graph.index.get(id);
+    const mod = {task: 'tasks', note: 'kb', decision: 'decisions', memory: 'memory', service: 'services'}[n?.kind];
+    // 落到笔记真实所在目录层（分区 + 完整子路径）
+    if (mod) setFocus({mod, zone: mod === 'kb' && String(n.folder || '').startsWith('f:kb:')
+      ? [n.folder.slice(5), n.subzone].filter(Boolean).join('/') || null : null, sel: id});
+  };
+  const onAction = useCallback(a => {
+    if (a.type === 'read') setReadNode(graph.index.get(a.id));
+    if (a.type === 'station') window.open('http://127.0.0.1:8331/', '_blank');
+    if (a.type === 'taskOp') {
+      setToast(`${a.id} 执行中…`);
+      taskAction(a).then(r => {
+        setToast(r?.ok ? (r.msg || '已执行') : `失败：${r?.msg || '未知错误'}`);
+        if (r?.ok) pullRef.current?.();
+      }).catch(() => setToast('写接口不可达（8330）'));
+    }
+    if (a.type === 'decideOp') {
+      setDeciding(a);
+    }
+  }, [graph]);
+
+  const runDecide = useCallback(a => {
+    setDeciding(null);
+    setToast(`${a.id} 收口中…`);
+    decideAction(a).then(r => {
+      setToast(r?.ok ? (r.msg || '已收口') : `失败：${r?.msg || '未知错误'}`);
+      if (r?.ok) pullRef.current?.();
+    }).catch(() => setToast('写接口不可达（8330）'));
+  }, []);
+
+  return <div className="neural page-home">
     <header className="topbar">
-      <a className="brand" href={asset('')} onClick={e => { e.preventDefault(); setPage('home'); setFocus({mod: null, sel: null}); }}>
-        <span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 28" width="18" height="21"><path fill={T.logo[0]} d="m14 1 8 7-2 12-7 7-10-5L1 12 8 4Z"/><path fill={T.logo[1]} d="m14 1-3 10 2 16 7-7 2-12Z"/><path fill={T.logo[2]} d="m14 1-3 10 11-3Z"/><path fill={T.logo[3]} d="m1 12 10-1 2 16-10-5Z"/></svg></span>
+      <a className="brand" href={asset('')} onClick={e => { e.preventDefault(); setFocus({mod: null, sel: null}); }}>
+        <span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 28" width="18" height="21"><path fill="#7d7f7c" d="m14 1 8 7-2 12-7 7-10-5L1 12 8 4Z"/><path fill="#d8d9d6" d="m14 1-3 10 2 16 7-7 2-12Z"/><path fill="#ecd9a6" d="m14 1-3 10 11-3Z"/><path fill="#a9aba7" d="m1 12 10-1 2 16-10-5Z"/></svg></span>
         <span className="brand-text">{CONFIG.brand.name} <b>/ {CONFIG.brand.sub}</b><small>{CONFIG.brand.tagline} · {CONFIG.brand.taglineEn}</small></span>
       </a>
-      <nav aria-label="主导航">{navs.map(([id, zh, en]) => <button key={id} className={page === id ? 'active' : ''} aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}>{zh}<em>{en}</em></button>)}</nav>
       <div className="top-actions">
-        <button className="pill primary" onClick={() => newDraft()}><Icon name="plus" size={14}/>新建草稿 <em>New</em></button>
-        <button className="avatar" onClick={() => setModal('about')} aria-label={`${snapshot.account}，查看账号与数据来源`}><img src={asset(CONFIG.avatar)} alt=""/></button>
+        {v && <span className="pill glass" title="工作站生命体征（30 秒轮询）">
+          <Icon name="agent" size={13}/>任务 <b><Count value={v.open_tasks}/></b> · 拍板 <b><Count value={v.pending_decisions}/></b> · 工者 <b>{v.workers_ok}</b><em style={{color: '#98a6a1'}}>/{v.workers_ok + v.workers_late + v.workers_down}</em>
+        </span>}
+        <button className="avatar" onClick={() => setModal('about')} aria-label="关于本图与数据来源"><img src={asset(CONFIG.avatar)} alt=""/></button>
       </div>
     </header>
 
     <main>
-      {page === 'home' && <>
-        <Home graph={graph} layout={layout} focus={focus} setFocus={setFocus} onAction={onAction} onAbout={() => setModal('about')} reduced={reduced}/>
-        <Snapshot goal={goal} onGoal={() => { setGoalInput(String(goal)); setModal('goal'); }} ideas={ideas} drafts={drafts} onIdea={editIdea} onDraft={id => { setActive(id); setPage('drafts'); }} onLibrary={id => { if (typeof id === 'string') setLibSel(id); setPage('library'); }}/>
-      </>}
-      {page === 'library' && <Library graph={graph} selected={libSel} setSelected={setLibSel} onGo={openInGraph} onAction={onAction}/>}
-      {page === 'drafts' && <Drafts graph={graph} drafts={drafts} setDrafts={setDrafts} active={active} setActive={setActive} onNew={() => newDraft()} onDelete={deleteDraft} onGo={openInGraph}/>}
-      {page === 'ideas' && <Ideas graph={graph} ideas={ideas} onEdit={editIdea} onGraph={openInGraph} onNew={() => editIdea({id: Math.max(0, ...ideas.map(i => i.id)) + 1, title: '', platform: '小红书', priority: '中', status: '待写', note: ''})}/>}
+      <Home graph={graph} layout={layout} focus={focus} setFocus={setFocus} onAction={onAction} onAbout={() => setModal('about')} reduced={reduced}/>
     </main>
 
     <footer className="site-foot">
-      <button onClick={() => setModal('about')}><Icon name="info" size={13}/>当前展示的是虚构示例数据，换成你自己的数据见 README <em>Sample data</em></button>
+      <button onClick={() => setModal('about')}><Icon name="info" size={13}/>数据来源：工作站实体投影 + 知识库现场扫描 · 任务·拍板就地收口 <em>Local &amp; live</em></button>
       <span>{CONFIG.footer.zh}<em>{CONFIG.footer.en}</em></span>
     </footer>
 
     {toast && <div className="toast glass" role="status"><Icon name="check" size={15}/>{toast}</div>}
 
-    {modal === 'about' && <Modal title="关于这份数据" en="About the data" onClose={close}>
+    {modal === 'about' && <Modal title="关于这张生态星图" en="About the ecosystem" onClose={close}>
       <div className="about">
-        <p>账号 <em>Account</em>：<strong>{snapshot.account}</strong> · 读取日期 <em>Captured</em>：{snapshot.capturedAt}</p>
-        <p>数据来源 <em>Source</em>：{snapshot.source}；笔记首发 {snapshot.publishedFrom} — {snapshot.publishedTo}。</p>
+        <p>中心 <em>Core</em>：<strong>{CONFIG.workspace}</strong> · 数据每 30 秒从本机服务实时拉取。</p>
         <hr/>
-        <h3>图谱怎么来的 <em>How the graph is built</em></h3>
-        <p>全部由 <code>src/data/sample.js</code> 里的资料在浏览器中推导，不读取外部 Obsidian 仓库：</p>
+        <h3>五个模块的数据来源 <em>Where the data comes from</em></h3>
         <ul>
-          <li><b>[[双链]] Wikilinks</b>：方法库笔记与草稿正文中的双链；找不到对应笔记的记为「未创建」。</li>
-          <li><b>话题 Topics</b>：作品正文里的 # 话题标签。</li>
-          <li><b>正文提及 Mentions</b>：内容中出现概念词（如「模板」「口播」），且至少两条内容提及才成为概念节点。</li>
-          <li><b>双向共振 Resonance</b>：两条内容共同提及 ≥2 个概念，或选题与草稿互相记录。</li>
-          <li><b>选题来源 Source</b>：草稿记录来源选题；选题状态为「已转草稿」时反向成立。</li>
+          <li><b>任务流 Tasks</b>：工作站未结任务（T-xxx），来自 8331 实体投影；详情栏显示任务内容/调度溯源，可直接改状态（完成/进行/待确认/退回）。</li>
+          <li><b>知识库 Knowledge</b>：本地知识库 markdown 笔记现场扫描，[[双链]] 与话题标签自动连线；分区 → 子目录 → 笔记逐层钻入，长清单用滚轮往下平移；详情栏看正文预览，「阅读全文」渲染 markdown（标题/表格/代码块/图片），双链可点在图内跳转。</li>
+          <li><b>拍板台 Decisions</b>：三门槛落账的待拍板事项（D-xxx），详情栏就地收口（批准走执行链，多方案可选）。</li>
+          <li><b>记忆池 Memory</b>：memorycore 池条目实时状态（降级候选摘要）。</li>
+          <li><b>服务舱 Services</b>：核心服务健康探测 + 常驻工作者心跳。</li>
         </ul>
-        <p>作品库：{posts.length} 篇<b>示例作品</b>，账号、标题、日期与指标均为虚构，仅用于展示效果。</p>
         <p>当前：{s.content} 条内容 · {s.links} 条连接 · {s.mutual} 组双向 · {s.ghosts} 个未创建双链。</p>
-        <p className="quiet">图谱分析是本地规则检索，未调用 AI。选题、草稿与目标保存在当前浏览器，不写入 Obsidian、不发布到平台。<em>Local rules only · no AI · nothing is published.</em></p>
+        <p className="quiet">数据全部本机，不外发；任务与拍板都能在详情栏直接收口，驾驶舱留作备用入口。<em>Local first, nothing is published.</em></p>
       </div>
     </Modal>}
-    {modal === 'goal' && <Modal title="本月发布目标" en="Monthly goal" onClose={close}>
-      <form className="form" onSubmit={e => { e.preventDefault(); const n = Number(goalInput); if (Number.isInteger(n) && n >= 1 && n <= 100) { setGoal(n); setModal(null); setToast('发布目标已更新 · Goal updated'); } }}>
-        <p className="quiet">本月已发布 {monthPosts.length} 篇。目标只保存在当前浏览器。</p>
-        <label>目标篇数 <em>Target</em><input autoFocus type="number" min="1" max="100" step="1" required value={goalInput} onChange={e => setGoalInput(e.target.value)}/></label>
-        <div className="form-actions"><button type="button" className="pill ghost" onClick={close}>取消 <em>Cancel</em></button><button className="pill primary">保存目标 <em>Save</em></button></div>
-      </form>
+    {deciding && <Modal title="拍板确认" en="Confirm decision" onClose={() => setDeciding(null)}>
+      {(() => {
+        const d = graph.nodes.find(n => n.decision?.id === deciding.id)?.decision || {};
+        const TO_ZH = {approved: '批准', rejected: '否决', resolved: '销账（已处理）'};
+        return <div className="confirm-box">
+          <p className="confirm-line"><b>{deciding.id}</b>{d.title ? ` · ${d.title}` : ''}</p>
+          <p className="confirm-line">动作：<b>{TO_ZH[deciding.to] || deciding.to}</b>{deciding.choice ? `（方案 ${deciding.choice}）` : ''}</p>
+          {deciding.to === 'approved' && <p className="quiet">批准会走执行链：自动建关联任务并派 AI 执行会话。</p>}
+          <div className="confirm-actions">
+            <button className="primary" onClick={() => runDecide(deciding)}>确认执行 <em>Confirm</em></button>
+            <button onClick={() => setDeciding(null)}>取消 <em>Cancel</em></button>
+          </div>
+        </div>;
+      })()}
     </Modal>}
-    {modal === 'idea' && editing && <Modal title="选题详情" en="Idea" onClose={close}>
-      <div className="form">
-        <p className="quiet">编辑后保存在此浏览器 <em>Saved locally</em></p>
-        <label>选题标题 <em>Title</em><input autoFocus value={editing.title} onChange={e => setEditing({...editing, title: e.target.value})}/></label>
-        <div className="form-row">
-          <label>优先级 <em>Priority</em><select value={editing.priority} onChange={e => setEditing({...editing, priority: e.target.value})}><option>高</option><option>中</option><option>低</option></select></label>
-          <label>状态 <em>Status</em><select value={editing.status} onChange={e => setEditing({...editing, status: e.target.value})}><option>待写</option><option>待扩展</option><option>已转草稿</option></select></label>
-        </div>
-        <label>创作备注 <em>Brief</em><textarea value={editing.note} onChange={e => setEditing({...editing, note: e.target.value})}/></label>
-        <div className="form-actions">
-          <button className="pill ghost" disabled={!editing.title.trim()} onClick={saveIdea}>保存选题 <em>Save</em></button>
-          <button className="pill primary" disabled={!editing.title.trim()} onClick={() => toDraft(editing)}><Icon name="draft" size={14}/>{drafts.some(d => d.source === editing.id) ? '打开关联草稿' : '转为草稿'} <em>{drafts.some(d => d.source === editing.id) ? 'Open draft' : 'To draft'}</em></button>
-        </div>
-        <p className="quiet">转为草稿只生成本地写作提纲，不模拟 AI 生成结果。</p>
-      </div>
-    </Modal>}
-    {modal?.read && <Modal title={modal.read.short || modal.read.title} en={KINDS[modal.read.kind].en} onClose={close} wide>
-      <div className="reader"><p className="quiet">{modal.read.path}</p><pre>{modal.read.body}</pre></div>
-    </Modal>}
+    {readNode && <Reader node={readNode} graph={graph} onJump={id => { setReadNode(null); openInGraph(id); }} onClose={() => setReadNode(null)}/>}
   </div>;
 }
 

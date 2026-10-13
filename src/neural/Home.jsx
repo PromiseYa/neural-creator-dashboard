@@ -1,34 +1,65 @@
 import React, {useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback} from 'react';
-import {MODULES, KINDS, stats, askGraph, moduleOf} from './graph';
+import {MODULES, KINDS, stats, askGraph, moduleOf, STATUS_ZH} from './graph';
 import {Icon} from './icons';
 import {NetworkCanvas} from './NetworkCanvas';
 import {Analysis} from './Analysis';
 import {T} from './theme';
 import {CONFIG} from '../config';
+import {glowSprite} from './sprites';
 
-const FLIP = {works: 1, concepts: -1, methods: -1, ideas: -1, drafts: 1};
+const FLIP = {tasks: 1, kb: -1, decisions: -1, memory: 1, services: -1};
 export const MOD_STYLE = Object.fromEntries(Object.entries(T.modules).map(([id, m]) => [id, {...m, flip: FLIP[id]}]));
 
 export const split = n => ({out: n.out - n.mutual, back: n.in - n.mutual, both: n.mutual});
 const fmt = v => v == null ? '—' : Number(v).toLocaleString('zh-CN');
 
-export function moduleItems(graph, modId) {
+// 知识库按真实目录层级钻取（文件浏览器语义）：zone=null 显示分区层；
+// zone='工作区' 或更深 '工作区/子目录/xx' 时，每层都显示 [子目录卡 + 直接放在本层的笔记] 混排，
+// 目录卡篇数 = 该子树的全部笔记数。清单不设上限，往下延伸用滚轮平移。
+export function moduleItems(graph, modId, zone) {
   const m = MODULES.find(x => x.id === modId);
   if (!m) return [];
+  if (m.kind === 'note' && zone !== undefined) {
+    if (!zone) {
+      const zones = graph.nodes.filter(n => n.kind === 'folder' && n.id.startsWith('f:kb:'));
+      return zones.map(n => ({...n, count: graph.links.filter(l => l.kind === 'contain' && l.a === n.id).length, path: n.title}))
+        .sort((a, b) => b.count - a.count);
+    }
+    const [z0, ...rest] = zone.split('/');
+    const prefix = rest.join('/');
+    const inZone = graph.nodes.filter(n => n.kind === 'note' && n.folder === 'f:kb:' + z0);
+    const dirs = new Map(), roots = [];
+    for (const n of inZone) {
+      const sz = n.subzone || '';
+      // 把 subzone 折算成相对当前层的余段：本层笔记为 ''，更深层取下一段目录名
+      let rel = null;
+      if (!prefix) rel = sz;
+      else if (sz === prefix) rel = '';
+      else if (sz.startsWith(prefix + '/')) rel = sz.slice(prefix.length + 1);
+      if (rel === null) continue;
+      if (!rel) roots.push(n);
+      else dirs.set(rel.split('/')[0], (dirs.get(rel.split('/')[0]) || 0) + 1);
+    }
+    const dirCards = [...dirs].map(([name, count]) => ({id: 'f:kb:' + zone + '/' + name, kind: 'folder', title: name, short: name,
+      count, path: zone + '/' + name, level: 3}));
+    return [...dirCards.sort((a, b) => b.count - a.count),
+      ...roots.sort((a, b) => String(b.updated || '').localeCompare(String(a.updated || '')))];
+  }
   const list = graph.nodes.filter(n => n.kind === m.kind);
-  if (m.kind === 'post') list.sort((a, b) => String(b.date).localeCompare(String(a.date)));
-  if (m.kind === 'concept') list.sort((a, b) => b.in - a.in);
+  if (m.kind === 'post') list.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  if (m.kind === 'task') list.sort((a, b) => String(b.task?.updated_at || '').localeCompare(String(a.task?.updated_at || '')));
+  if (m.kind === 'note') list.sort((a, b) => String(b.updated || '').localeCompare(String(a.updated || '')));
   return list;
 }
 
 function moduleSummary(graph, m) {
   const items = moduleItems(graph, m.id);
   const sub = {
-    works: () => [fmt(items.reduce((s, n) => s + n.post.views, 0)), '观看', 'views'],
-    concepts: () => [fmt(items.reduce((s, n) => s + n.in, 0)), '提及', 'mentions'],
-    methods: () => [graph.links.filter(l => l.kind === 'wiki').length, '双链', 'wikilinks'],
-    ideas: () => [items.filter(n => n.idea.status !== '已转草稿').length, '待写', 'to write'],
-    drafts: () => [fmt(items.reduce((s, n) => s + (n.body || '').length, 0)), '字', 'chars']
+    tasks: () => [items.filter(n => n.task?.status === 'doing').length || items.length, '未结', 'open'],
+    kb: () => [graph.links.filter(l => l.kind === 'wiki').length, '双链', 'wikilinks'],
+    decisions: () => [items.filter(n => n.decision?.status === 'pending').length, '待拍', 'pending'],
+    memory: () => [items.length, '条目', 'items'],
+    services: () => [items.filter(n => n.service?.ok).length, '在线', 'online']
   }[m.id]();
   return {count: items.length, sub};
 }
@@ -36,21 +67,26 @@ function moduleSummary(graph, m) {
 function itemMeta(n) {
   const d = split(n);
   switch (n.kind) {
-    case 'post': return [['观看', 'Views', fmt(n.post.views)], ['收藏', 'Saves', fmt(n.post.saves)], ['↔', '', d.both]];
+    case 'folder': return [['篇数', 'Notes', n.count || 0], ['', '', ''], ['', '', '']];
+    case 'task': return [[STATUS_ZH[n.task?.status] || n.task?.status || '—', '', ''], [n.task?.priority || '—', '', ''], ['↔', '', d.both]];
     case 'note': return [['出链', 'Out', d.out], ['反链', 'In', d.back], ['↔', '', d.both]];
+    case 'decision': return [[n.decision?.status || '—', '', ''], [String(n.decision?.created_at || '').slice(5, 10) || '—', '', ''], ['↔', '', d.both]];
+    case 'memory': return [['记忆', '', ''], ['↔', '', d.both], ['', '', '']];
+    case 'service': return [[n.service?.ok ? '在线' : '离线', '', ''], [n.service?.state || '', '', ''], ['', '', '']];
+    case 'post': return [['观看', 'Views', fmt(n.post.views)], ['收藏', 'Saves', fmt(n.post.saves)], ['↔', '', d.both]];
     case 'idea': return [[n.idea.priority, 'Priority', ''], [n.idea.status, '', ''], ['↔', '', d.both]];
-    case 'draft': return [['字', 'Chars', fmt((n.body || '').length)], ['↔', '', d.both]];
-    case 'concept': return [['提及', 'Mentions', n.in], ['↔', '', d.both]];
+    case 'draft': return [['字', 'Chars', fmt((n.body || '').length)], ['↔', '', d.both], ['', '', '']];
+    case 'concept': return [['提及', 'Mentions', n.in], ['↔', '', d.both], ['', '', '']];
     default: return [];
   }
 }
 
 // —— 布局目标 ——
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-function targets(L, t) {
+export function targets(L, t) {
   const {w: W, h: H} = L.size, st = L.stage, narrow = W < 760;
   const swim = L.reduced ? 0 : 1;
-  const res = {orb: {}, jelly: {}, fan: null};
+  const res = {orb: {}, jelly: {}, fan: null, chain: null, pfan: null};
   if (st === 'hub') {
     const s = narrow ? clamp(W * .56, 180, 280) : clamp(Math.min(W, H) * .5, 250, 440);
     const cy = narrow ? H * .47 : H * .53;
@@ -78,12 +114,58 @@ function targets(L, t) {
       res.jelly[m.id] = {x: colX + (sel ? 16 : 0), y: cy + (k - 2) * gap + swim * 5 * Math.sin(t * .9 + i * 2), s: sel ? 128 : 92, o: sel ? 1 : .6, tilt: swim * 3 * Math.sin(t * .6 + i)};
     });
     // 伞状条目以右侧分析栏为基准排在它左边约 90px 处（条目最宽约 270px），触须拉长、画面左右均衡；
-    // 模块层和打开笔记后位置相同，右侧栏滑入时伞不跳动
-    const panelLeft = W - clamp(W * .33, 380, 470) - 44;
+    // 模块层和打开笔记后位置相同，右侧栏滑入时伞不跳动。
+    // 长清单不压缩间距：固定间距往下排，超出视口的部分用滚轮平移（panY），像一张往下无限延伸的画布。
+    const panelLeft = W - clamp(W * .30, 360, 440) - 44;
     const n = L.items.length;
-    const span = Math.min(H - 130, Math.max(0, n - 1) * 54);
+    const fgap = 54;
     const originX = colX + 16 + 128 * .5 + 10 + 168;
-    res.fan = {x: Math.min(Math.max(panelLeft - 270 - 90, originX + 60), panelLeft - 280), y0: cy - span / 2, gap: n > 1 ? span / (n - 1) : 0};
+    const fanBase = Math.min(Math.max(panelLeft - 270 - 90, originX + 60), panelLeft - 280);
+    const selOpen = L.stage === 'note';
+    // kb 目录钻取（宽屏）：每一层完整复刻"水母层"语法——选中卡调换到中间放大当该列主角（同选中水母居中），
+    // 同层兄弟卡保持原尺寸、变暗排在上下（同未选水母 o=.6；深列放不下才缩），下一层在右侧下一个槽位
+    // 按原尺寸完整展开（同点知识库后生出的那层）；连线=上一列选中卡右缘→下一列各卡，逐列接棒。
+    // 打开笔记时：整个构图（光球+水母列+祖先列+文件列）作为同一刚体向左平移+整体缩小给详情页让位——
+    // 结构原样、无人消失、无重排，ESC 原样放大还原。
+    const zchain = L.zonePath || [];
+    const zdRaw = L.mod === 'kb' && zchain.length > 1 ? zchain.length - 1 : 0;
+    const zd = Math.min(zdRaw, 2);
+    const SX = [fanBase, fanBase + 200, fanBase + 400];
+    const fit = !zd || SX[zd] + 270 <= W - 24;
+    const span = Math.max(0, n - 1) * fgap;
+    let x = fanBase, y0 = Math.max(cy - span / 2, 150), fg2 = fgap, fsc = 1;
+    res.acols = null;
+    if (zd && fit) {
+      x = SX[zd];
+      res.acols = (L.ancLevels || []).slice(0, zd).map((cards, k) => {
+        const pz = zchain[k + 1]?.zone;
+        const pi = Math.max(0, cards.findIndex(c => c.path === pz));
+        const pos = new Array(cards.length);
+        const nSib = cards.length - 1;
+        const sg = nSib ? Math.min(54, Math.max(30, (H - 280) / nSib)) : 54;
+        const sd = Math.min(1, sg / 46);   // 兄弟卡尽量保持原尺寸（文字不缩），只有深列排不下才等比缩
+        let ay = cy - 47, by = cy + 47, j = 0;
+        for (let i = 0; i < cards.length; i++) {
+          if (i === pi) { pos[pi] = {x: SX[k], y: cy, s: 1, path: true}; continue; }
+          pos[i] = j % 2 === 0 ? {x: SX[k], y: ay, s: sd, dim: true} : {x: SX[k], y: by, s: sd, dim: true};
+          if (j % 2 === 0) ay -= sg; else by += sg;
+          j++;
+        }
+        return pos;
+      });
+      if (selOpen) {
+        // 整体缩小+向左平移（同一刚体变换）：以光球左缘为锚，把 水母列/祖先列/文件列 一起压缩到详情页左侧。
+        // g 按笔记模式标题收窄后的实际卡宽估（160+边距≈200），面板已收窄让位 → 缩得更少
+        const AX = 125, g = Math.min(1, (panelLeft - 20 - AX) / (SX[zd] - AX + 200));
+        const mx = v => AX + (v - AX) * g;
+        res.noteG = g;
+        res.orb.x = mx(res.orb.x); res.orb.s *= g;
+        for (const id in res.jelly) { const jj = res.jelly[id]; jj.x = mx(jj.x); jj.y = cy + (jj.y - cy) * g; jj.s *= g; }
+        res.acols = res.acols.map(col => col.map(p => p && ({x: mx(p.x), y: cy + (p.y - cy) * g, s: p.s * g, path: p.path, dim: p.dim})));
+        x = mx(x); y0 = cy + (y0 - cy) * g; fg2 = fgap * g; fsc = g;
+      }
+    }
+    res.fan = {x, y0, gap: fg2, scale: fsc, panMax: Math.max(0, y0 + span * fsc + 70 - H)};
   }
   return res;
 }
@@ -133,15 +215,16 @@ function paintVideo(pair) {
 
 const bez = (p0, p1, p2, p3, u) => { const m = 1 - u; return m * m * m * p0 + 3 * m * m * u * p1 + 3 * m * u * u * p2 + u * u * u * p3; };
 
-function Scene({graph, items, onModule, onItem, live, sel}) {
+function Scene({graph, items, onModule, onItem, live, sel, zonePath, ancLevels, zone}) {
   const dustRef = useRef(null);
-  const orbRef = useRef(null), jellyRefs = useRef({}), innerRefs = useRef({}), labelRefs = useRef({}), threadRefs = useRef({}), pulseRefs = useRef({});
+  const orbRef = useRef(null), jellyRefs = useRef({}), innerRefs = useRef({}), labelRefs = useRef({}), threadRefs = useRef({}), pulseRefs = useRef({}), sceneRef = useRef(null);
   const itemRefs = useRef([]), fanRefs = useRef([]), fanPulseRefs = useRef([]);
+  const aItemRefs = useRef([]), aThreadRefs = useRef([]);
   const vids = useRef({});
   const vidRef = (id, part) => el => { (vids.current[id] ||= {})[part] = el; };
   const summaries = useMemo(() => Object.fromEntries(MODULES.map(m => [m.id, moduleSummary(graph, m)])), [graph]);
 
-  useLayoutEffect(() => { live.current.itemState = items.map(() => null); live.current.fanStart = performance.now(); }, [items, live]);
+  useLayoutEffect(() => { live.current.fanStart = performance.now(); }, [items, live]);
 
   useEffect(() => {
     let raf, last = performance.now();
@@ -153,6 +236,8 @@ function Scene({graph, items, onModule, onItem, live, sel}) {
       if (!L.paused) L.time += dt;
       const t = L.time, since = (now - L.t0) / 1000;
       const T = targets(L, t);
+      L.noteG = T.noteG || 1;   // 笔记模式整组缩放系数：水母标签同步缩放（文本框不缩会挤压且线条起点错位）
+      if (T.fan) L.fanMeta = {panMax: T.fan.panMax || 0, n: L.items.length};
       const intro = L.stage === 'hub' && !L.reduced;
       // 光球
       const orbS = intro && since < .15 ? T.orb.s * .35 : T.orb.s;
@@ -171,10 +256,10 @@ function Scene({graph, items, onModule, onItem, live, sel}) {
             const ph = ((t * p.v + p.o) % 1 + 1) % 1, r = 150 + ph * 340, a = p.a + ph * p.w;
             const x = 506 + Math.cos(a) * r, y = 506 + Math.sin(a) * r * .96;
             const al = di * Math.pow(Math.max(0, Math.sin(ph * Math.PI)), 1.3) * p.b, rad = p.s / sc * 2.2;
-            const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
-            g.addColorStop(0, `rgba(${p.c},${al})`); g.addColorStop(1, `rgba(${p.c},0)`);
-            ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
+            ctx.globalAlpha = al;
+            ctx.drawImage(glowSprite(p.c), x - rad, y - rad, rad * 2, rad * 2);
           }
+          ctx.globalAlpha = 1;
         }
       }
       // 水母
@@ -188,14 +273,15 @@ function Scene({graph, items, onModule, onItem, live, sel}) {
         if (el) { el.style.transform = `translate3d(${x - s / 2}px,${y - s * .375}px,0) scale(${s / 200})`; el.style.opacity = clamp(o, 0, 1); }
         if (inner) inner.style.transform = `rotate(${tg.tilt}deg) scaleX(${MOD_STYLE[m.id].flip})`;
         if (lab) {
-          const lw = lab.offsetWidth, lh = lab.offsetHeight;
+          const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
           const hub = L.stage === 'hub', narrow = L.size.w < 760;
-          // 侧列时标签放在水母右边缘之外再空 10px，触须不压标签
+          // 侧列时标签放在水母右边缘之外再空 10px，触须不压标签；笔记模式整组缩放时标签同步缩放
           const lx = hub ? x - lw / 2 : narrow ? x - lw / 2 : x + s * .5 + 10;
           const ly = hub ? y + s * .36 : narrow ? y + s * .36 : y - lh / 2;
-          lab.style.transform = `translate3d(${lx}px,${ly}px,0)`;
+          lab.style.transformOrigin = 'left center';
+          lab.style.transform = `translate3d(${lx}px,${ly}px,0) scale(${ng})`;
           lab.style.opacity = clamp(narrow && !hub && m.id !== L.mod ? 0 : lo, 0, 1);
-          j.label = {x: lx, y: ly, w: lw, h: lh};
+          j.label = {x: lx, y: ly, w: lw * ng, h: lh * ng};   // w/h 记缩放后的视觉宽：连线起点才不会错位
         }
         // 光球 → 水母：神经丝与往返脉冲
         const g = threadRefs.current[m.id];
@@ -226,20 +312,65 @@ function Scene({graph, items, onModule, onItem, live, sel}) {
           });
         }
       });
-      // 选中模块 → 多篇笔记（触须式扇形展开）
+      // 层级递进列（kb 钻取）：卡片弹簧状态按节点 id 全局缓存（Map）——钻深/回退时同一张卡在
+      // "当前列 ↔ 祖先列"之间换角色而位置连续（旧列原地等比缩小、回退时原地放大，不重生长不闪跳）。
+      // 每列的触须都从上一列"钻入卡"右缘扇形展开（首列由水母标签喂养）——"水母→下一层"同一模式逐级复用
       const sj = L.mod && S.jelly[L.mod];
+      const vis = L.vis || (L.vis = new Map());
+      const touched = new Set();   // 本帧渲染到的卡片（祖先列/当前列），没触到的置 off——重进当前列时从源头重生
+      const cardState = (id, sx, sy, ss) => {
+        let st = vis.get(id);
+        if (!st) { st = {x: sp(sx), y: sp(sy), s: sp(ss), o: sp(0), seen: false}; vis.set(id, st); }
+        return st;
+      };
+      let feed = sj?.label ? {x: sj.label.x + sj.label.w + 6, y: sj.cur.y, o: 1} : null;   // 当前列的喂养源：一路接棒到最深祖先列的选中卡
+      (T.acols || []).forEach((col, k) => {
+        const cards = ancLevels[k];
+        if (!cards) return;
+        const src = feed;   // 本列触须源头=上一列选中卡（首列=水母标签），本列选中卡稍后接棒
+        col.forEach((tp, i) => {
+          if (!tp) return;
+          const n = cards[i];
+          const st = cardState(n.id, src ? src.x : tp.x, src ? src.y : tp.y, tp.s);
+          st.role = 'anc'; touched.add(n.id);
+          const ready = L.reduced || now - L.chainStart > 60 + (k * 6 + i) * Math.min(50, 900 / Math.max(cards.length, 1));
+          if (clamp(st.o.x, 0, 1) > .6) st.seen = true;
+          const x = spring(st.x, tp.x, dt, 62), y = spring(st.y, tp.y + (L.reduced ? 0 : Math.sin(t * .6 + i * .8 + k * 1.3) * 3), dt, 62);
+          const s = spring(st.s, tp.s, dt, 62), o = spring(st.o, st.seen || ready ? (tp.dim ? .62 : 1) : 0, dt, 40);
+          const el = aItemRefs.current[k]?.[i];
+          const sc = clamp(s, .2, 1);
+          if (el) { el.style.transformOrigin = 'top left'; el.style.transform = `translate3d(${x}px,${y}px,0) scale(${sc})`; el.style.opacity = clamp(o, 0, 1); el.style.pointerEvents = clamp(o, 0, 1) > .6 ? '' : 'none'; }
+          if (tp.path && el) {
+            feed = {x: x + el.offsetWidth * sc + 6, y: y + 15 * sc, o: clamp(o, 0, 1)};   // 文件触须源头=最深祖先列选中卡右缘（整组缩放后文件列仍在右侧，右缘出线不穿自家兄弟卡）
+          }
+          const p = aThreadRefs.current[k]?.[i];
+          if (p && src) {
+            const ey = y + 15 * sc, mx = (src.x + x) / 2;
+            p.setAttribute('d', `M${src.x},${src.y} C${mx},${src.y} ${mx},${ey} ${x - 4},${ey}`);
+            p.style.opacity = clamp(Math.min(o, src.o), 0, 1) * (tp.path ? .85 : .4);
+          } else if (p) p.style.opacity = 0;
+        });
+      });
+      // 选中模块 → 多篇笔记（触须式扇形展开）；kb 钻取时触须从最深祖先列的"钻入卡"右缘长出
       if (T.fan && sj?.label) {
         const narrow = L.size.w < 760;
-        const ox2 = narrow ? sj.label.x + sj.label.w / 2 : sj.label.x + sj.label.w + 6, oy2 = narrow ? sj.label.y + sj.label.h + 4 : sj.cur.y;
+        let ox2 = narrow ? sj.label.x + sj.label.w / 2 : sj.label.x + sj.label.w + 6, oy2 = narrow ? sj.label.y + sj.label.h + 4 : sj.cur.y;
+        if (T.acols && feed && feed.o > .5) { ox2 = feed.x; oy2 = feed.y; }   // 钻取时触须从最深祖先列选中卡右缘长出（线条连接对应的文本框）
         items.forEach((n, i) => {
-          if (!L.itemState[i]) L.itemState[i] = {x: sp(ox2), y: sp(oy2), o: sp(0)};
-          const st = L.itemState[i];
-          // 触须一根一根依次长出（20 条约 1.8 秒），形成伞状开花的节奏
+          const st = cardState(n.id, ox2, oy2, T.fan.scale || 1);
+          // 触须一根一根依次长出（20 条约 1.8 秒），形成伞状开花的节奏；panY=滚轮平移量（长清单画布）。
+          // 卡片重进当前列（ESC 回退/重访）时弹簧重置到源头重生——不是从旧位置平移拉过去，始终是"生出下一层"
+          if (st.role !== 'cur') { st.x = sp(ox2); st.y = sp(oy2); st.s = sp(T.fan.scale || 1); st.o = sp(0); st.seen = false; }
+          st.role = 'cur'; touched.add(n.id);
           const ready = L.reduced || now - L.fanStart > 160 + i * Math.min(90, 1800 / Math.max(items.length, 1));
-          const tx = T.fan.x, ty = T.fan.y0 + i * T.fan.gap + (L.reduced ? 0 : Math.sin(t * .8 + i * .9) * 2);
-          const x = spring(st.x, ready ? tx : ox2, dt, 70), y = spring(st.y, ready ? ty : oy2, dt, 70), o = spring(st.o, ready ? 1 : 0, dt, 50);
+          if (clamp(st.o.x, 0, 1) > .6) st.seen = true;
+          const grow = st.seen || ready;
+          const pan = L.panY || 0;
+          const tx = T.fan.x, ty = T.fan.y0 + i * T.fan.gap - pan + (L.reduced ? 0 : Math.sin(t * .8 + i * .9) * 2);
+          const x = spring(st.x, grow ? tx : ox2, dt, 70), y = spring(st.y, grow ? ty : oy2, dt, 70), o = spring(st.o, grow ? 1 : 0, dt, 50);
+          const sc = clamp(spring(st.s, T.fan.scale || 1, dt, 62), .3, 1);   // 笔记模式整组缩放时文件卡同步缩
           const el = itemRefs.current[i];
-          if (el) { el.style.transform = `translate3d(${x}px,${y - 15}px,0)`; el.style.opacity = clamp(o, 0, 1); }
+          if (el) { el.style.transformOrigin = 'top left'; el.style.transform = `translate3d(${x}px,${y - 15}px,0) scale(${sc})`; el.style.opacity = clamp(o, 0, 1); }
           const p = fanRefs.current[i];
           if (p) {
             const dx = x - ox2, sway = L.reduced ? 0 : Math.sin(t * 1.1 + i * .7) * 7;
@@ -258,6 +389,8 @@ function Scene({graph, items, onModule, onItem, live, sel}) {
           }
         });
       }
+      // 本帧没渲染到的卡片置 off（离开当前列/祖先列），下次再进当前列时从源头重生
+      for (const [id, st] of vis) if (!touched.has(id)) st.role = 'off';
       // 光球与水母的视频画面
       for (const pair of Object.values(vids.current)) paintVideo(pair);
     };
@@ -277,7 +410,9 @@ function Scene({graph, items, onModule, onItem, live, sel}) {
   }, [live]);
 
   const hub = live.current.stage === 'hub';
-  return <div className={`scene stage-${live.current.stage}`}>
+  // 静态兜底位置：渲染帧（rAF）冻结时（如窗口被遮挡）各元素也按最终布局可见可点，正常时 rAF 接管动画
+  const t0 = targets(live.current, 0);
+  return <div className={`scene stage-${live.current.stage}`} ref={sceneRef}>
     <div className="orb" ref={orbRef} aria-hidden="true">
       <div className="orb-halo"/>
       <video className="vsrc" ref={vidRef('orb', 'video')} src={T.media.orb} poster={T.media.orbPoster} muted loop playsInline autoPlay preload="auto"/>
@@ -295,6 +430,7 @@ function Scene({graph, items, onModule, onItem, live, sel}) {
         <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], core: el}; }} className="thread-core"/>
         {[0, 1, 2].map(k => <circle key={k} r={k === 2 ? 4.5 : 5.5} fill={`url(#${k === 2 ? 'pulse-in' : 'pulse-out'})`} ref={el => { (pulseRefs.current[m.id] ||= [])[k] = el; }}/>)}
       </g>)}
+      {(t0.acols ? ancLevels || [] : []).map((lvl, k) => lvl.map((n, i) => <path key={'at' + k + n.id} className="chain-thread dim" ref={el => { (aThreadRefs.current[k] ||= [])[i] = el; }}/>))}
       {items.map((n, i) => <g key={n.id} style={{color: KINDS[n.kind].color}}>
         <path className="fan-thread" ref={el => { fanRefs.current[i] = el; }}/>
         {[0, 1].map(k => <circle key={k} r={k ? 3.5 : 4.5} fill={`url(#${k ? 'pulse-in' : 'pulse-out'})`} ref={el => { (fanPulseRefs.current[i] ||= [])[k] = el; }}/>)}
@@ -321,9 +457,24 @@ function Scene({graph, items, onModule, onItem, live, sel}) {
         </button>
       </React.Fragment>;
     })}
-    {items.map((n, i) => {
+    {(t0.acols || []).map((col, k) => col.map((tp, i) => {
+      // 祖先列卡片（水母列语法）：选中卡放大居中当主角，兄弟卡缩小排上下；点击任意卡切回该层
+      const n = (ancLevels || [])[k]?.[i];
+      if (!n || !tp) return null;
       const meta = itemMeta(n);
-      return <button key={n.id} className={`fan-item ${sel === n.id ? 'active' : ''} kind-${n.kind}`} ref={el => { itemRefs.current[i] = el; }} onClick={() => onItem(n.id)} style={{'--kc': KINDS[n.kind].color}} aria-label={`打开 ${n.title} 的分析`}>
+      return <button key={n.id} className={`fan-item mini${tp.path ? ' active' : ''}`} ref={el => { (aItemRefs.current[k] ||= [])[i] = el; }}
+        onClick={() => onItem(n)} style={{'--kc': KINDS[n.kind].color, transform: `translate3d(${tp.x}px,${tp.y}px,0) scale(${tp.s})`, transformOrigin: 'top left', opacity: tp.dim ? .62 : .9}}
+        aria-label={`${n.title}${n.count != null ? '，' + n.count + ' 篇' : ''}`}>
+        <span className="fi-dot"/>
+        <span className="fi-body">
+          <span className="fi-title">{n.short || n.title}</span>
+          <span className="fi-meta">{meta.map(([kk, en, v], j) => <span key={j} className={kk === '↔' ? 'mutual' : ''}>{kk}{en && <em>{en}</em>} {v !== '' && <b>{v}</b>}</span>)}</span>
+        </span>
+      </button>;
+    }))}
+    {items.map((n, i) => {
+      const meta = itemMeta(n), fp = t0.fan;
+      return <button key={n.id} className={`fan-item ${sel === n.id ? 'active' : ''} kind-${n.kind}`} ref={el => { itemRefs.current[i] = el; }} onClick={() => onItem(n)} style={{'--kc': KINDS[n.kind].color, transform: `translate3d(${fp.x}px,${fp.y0 + i * fp.gap - 15}px,0) scale(${fp.scale || 1})`, transformOrigin: 'top left'}} aria-label={`打开 ${n.title} 的分析`}>
         <span className="fi-dot"/>
         <span className="fi-body">
           <span className="fi-title">{n.short || n.title}</span>
@@ -366,7 +517,7 @@ function Dock({graph, onGo}) {
       </form>
       <div className="dock-chips">
         <span className="me"><Icon name="agent" size={13}/>我的图谱 <em>My graph</em></span>
-        {['双向连接有哪些？', '最核心的内容', '下一篇写什么', '未创建的笔记'].map(x => <button key={x} onClick={() => typeAsk(x)}>{x}</button>)}
+        {['未结任务有哪些？', '待拍板', '服务健康', '最核心的内容'].map(x => <button key={x} onClick={() => typeAsk(x)}>{x}</button>)}
       </div>
     </div>
   </div>;
@@ -376,20 +527,51 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   const stageRef = useRef(null);
   const [size, setSize] = useState({w: 1280, h: 760});
   const [paused, setPaused] = useState(false);
-  const {mod, sel} = focus;
+  const [panned, setPanned] = useState(false);   // 用户滚过一次后隐藏平移提示（提示用完即走）
+  const {mod, zone, sel} = focus;
   const stage = sel ? 'note' : mod ? 'module' : 'hub';
-  const items = useMemo(() => moduleItems(graph, mod), [graph, mod]);
+  const items = useMemo(() => moduleItems(graph, mod, mod === 'kb' ? (zone || '') : undefined), [graph, mod, zone]);
+  // 层级卡链：按 zone 的真实目录层级逐级展开（任意深度），每张卡篇数 = 该层子树全部笔记数；
+  // 旧层缩小靠上保留（完整层名+篇数），点击直接回退到该层
+  const zoneChain = useMemo(() => {
+    if (mod !== 'kb' || !zone) return null;
+    const parts = zone.split('/');
+    const zoneNotes = graph.nodes.filter(x => x.kind === 'note' && x.folder === 'f:kb:' + parts[0]);
+    const chain = [
+      {name: '知识库', zone: null, n: graph.nodes.filter(x => x.kind === 'note').length},
+      {name: parts[0], zone: parts[0], n: zoneNotes.length}
+    ];
+    let sub = '';
+    for (let i = 1; i < parts.length; i++) {
+      sub = sub ? sub + '/' + parts[i] : parts[i];              // subzone 相对分区，不含分区段
+      const pref = sub + '/';
+      chain.push({name: parts[i], zone: parts.slice(0, i + 1).join('/'),
+        n: zoneNotes.filter(x => { const s = x.subzone || ''; return s === sub || s.startsWith(pref); }).length});
+    }
+    return chain;
+  }, [graph, mod, zone]);
+  // 画布层级链：完整各级（含"知识库"首级）；笔记选中（note 阶段）保持挂载，由 rAF 淡出而非瞬间卸载
+  const zonePath = zoneChain || null;
+  // 祖先列清单：钻取路径上每一层的内容（k=0=分区卡列，…），与当前列一起层层递进；
+  // 每列的"钻入卡"= 下一层的 zone（高亮 + 喂养下一列触须）
+  const ancLevels = useMemo(() => {
+    if (mod !== 'kb' || !zoneChain) return [];
+    const out = [];
+    for (let k = 0; k < zoneChain.length - 1; k++) out.push(moduleItems(graph, 'kb', zoneChain[k].zone));
+    return out;
+  }, [graph, mod, zoneChain]);
   const live = useRef(null);
   if (!live.current) {
     const now = performance.now();
-    live.current = {t0: now, time: 0, stage, mod, items, size, reduced, paused: false, hover: null, itemState: [], fanStart: now, orb: {x: 640, y: 380, s: 400},
+    live.current = {t0: now, time: 0, stage, mod, items, size, reduced, paused: false, hover: null, fanStart: now,
+      chainStart: 0, zonePath: null, vis: new Map(), orb: {x: 640, y: 380, s: 400},
       springs: {dust: sp(.3), orb: {x: sp(size.w / 2), y: sp(size.h / 2), s: sp(120), o: sp(0)}, jelly: Object.fromEntries(MODULES.map(m => [m.id, {x: sp(size.w / 2), y: sp(size.h / 2), s: sp(20), o: sp(0), lo: sp(0)}]))}};
     let seen = false;
     try { seen = !!sessionStorage.getItem('neural-intro-seen'); } catch {}
     live.current.introSeen = reduced || seen;
     if (live.current.introSeen) live.current.t0 = now - 6000;
   }
-  Object.assign(live.current, {stage, mod, items, size, reduced, paused});
+  Object.assign(live.current, {stage, mod, items, size, reduced, paused, zonePath, ancLevels});
   useLayoutEffect(() => {
     const el = stageRef.current;
     const measure = () => {
@@ -409,18 +591,118 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   }, []);
   useEffect(() => { try { sessionStorage.setItem('neural-intro-seen', '1'); } catch {} }, []);
   useEffect(() => { live.current.syncVideo?.(); }, [paused]);
+  // 换层时清单平移归零（重新从顶部看起），平移提示也复位；递进列的入场节奏重新计时
+  // （卡片弹簧状态按 id 存在 vis Map 里不重置——钻深/回退时旧列原地缩小/放大，位置连续）
+  useEffect(() => { live.current.panY = 0; setPanned(false); live.current.chainStart = performance.now(); }, [mod, zone, live]);
+  // 滚轮 = 平移长清单画布（module/note 视图且内容超出视口时）。
+  // 页面失焦/后台时渲染管线冻结（rAF、ResizeObserver 回调都不送达），挂载瞬间的陈旧尺寸会一直留着；
+  // 所以这里同步补测 clientWidth/Height 并按需重算 panMax（targets 是纯函数），滚轮路径不依赖渲染帧。
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onWheel = e => {
+      const L = live.current;
+      // 信息栏（最右详情块）/弹窗/搜索结果内部是原生滚动区：事件落在里面就放行，不劫持成平移
+      if (e.target?.closest?.('.analysis-wrap, .veil, .ask-results')) return;
+      const w = el.clientWidth, h = el.clientHeight;
+      if (w && (L.size.w !== w || L.size.h !== h)) { L.size = {w, h}; setSize({w, h}); }
+      if (L.stage === 'hub') return;   // module 和 note（笔记开着）都允许滚轮平移清单——否则点开一篇后长清单被锁死没法选其他篇
+      const panMax = targets(L, 0).fan?.panMax || 0;
+      if (!panMax) return;
+      e.preventDefault();
+      L.panY = clamp((L.panY || 0) + e.deltaY, 0, panMax);
+      if (e.deltaY > 0) setPanned(true);
+    };
+    el.addEventListener('wheel', onWheel, {passive: false});
+    // 触屏单指拖动 = 平移长清单（触控板双指=滚轮走上面；信息栏内同样放行原生滚动）
+    let touchPt = null;
+    const onTouchMove = e => {
+      const L = live.current;
+      if (e.touches.length !== 1 || e.target?.closest?.('.analysis-wrap, .veil, .ask-results')) { touchPt = null; return; }
+      const t = e.touches[0];
+      if (touchPt && L.stage !== 'hub') {
+        const panMax = targets(L, 0).fan?.panMax || 0;
+        if (panMax) { e.preventDefault(); L.panY = clamp((L.panY || 0) + (touchPt.y - t.clientY), 0, panMax); setPanned(true); }
+      }
+      touchPt = {x: t.clientX, y: t.clientY};
+    };
+    const onTouchEnd = () => { touchPt = null; };
+    el.addEventListener('touchmove', onTouchMove, {passive: false});
+    el.addEventListener('touchend', onTouchEnd);
+    // 鼠标按住拖拽 = 平移长清单（触摸板一指按住拖 / 真鼠标拖；壁纸模式 Lively 转发移动+左键即可用）。
+    // 起点 6px 内不算拖（保住纯点击开卡片），激活后画布 1.5 倍跟手、信息栏内 1:1 滚面板本身；拖完 80ms 内吞 click 防误开
+    let drag = null, suppressUntil = 0;
+    const onMouseDown = e => {
+      if (e.button !== 0 || e.target?.closest?.('.veil, .ask-results')) return;
+      drag = {x: e.clientX, y: e.clientY, panel: e.target?.closest?.('.analysis-wrap'), moved: false};
+    };
+    const onMouseMove = e => {
+      const L = live.current;
+      L.cursor = {x: e.clientX, y: e.clientY};   // 记录光标位置：键盘上下键按光标悬停区域路由（信息栏=滚面板/画布=平移清单）
+      if (!drag) return;
+      if (!drag.moved) {
+        if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
+        drag.moved = true;
+        if (drag.panel) drag.scroller = drag.panel.querySelector('.an-scroll');
+      }
+      const dy = drag.y - e.clientY;
+      if (drag.panel) { if (drag.scroller) drag.scroller.scrollTop += dy; }
+      else if (L.stage !== 'hub') {
+        const panMax = targets(L, 0).fan?.panMax || 0;
+        if (panMax) { L.panY = clamp((L.panY || 0) + dy * 1.5, 0, panMax); setPanned(true); }
+      }
+      drag.x = e.clientX; drag.y = e.clientY;
+    };
+    const onMouseUp = () => { if (drag?.moved) suppressUntil = performance.now() + 80; drag = null; };
+    const onClickCapture = e => { if (performance.now() < suppressUntil) { e.preventDefault(); e.stopPropagation(); } };
+    el.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    el.addEventListener('click', onClickCapture, true);
+    return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('touchmove', onTouchMove); el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('mousedown', onMouseDown); window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); el.removeEventListener('click', onClickCapture, true); };
+  }, []);
   useEffect(() => {
     const key = e => {
-      if (e.key !== 'Escape' || e.isComposing || document.querySelector('.veil')) return;
-      if (sel) setFocus({mod, sel: null}); else if (mod) setFocus({mod: null, sel: null});
+      if (e.isComposing || document.querySelector('.veil')) return;
+      // 键盘平移长清单（壁纸模式 Lively 转发键盘后即可用；焦点在桌面才转发，不影响别处打字）
+      if (e.key !== 'Escape') {
+        const L = live.current;
+        const tag = e.target?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable) return;
+        if (document.activeElement?.tagName === 'BUTTON' && (e.key === ' ' || e.key.startsWith('Arrow'))) return;   // 焦点在卡上时方向键留给无障碍导航
+        // 光标悬在信息栏上时，上下键滚面板本身（与滚轮/拖拽同款路由），否则平移清单
+        const cur = L.cursor;
+        const panelEl = cur && document.elementFromPoint(cur.x, cur.y)?.closest?.('.analysis-wrap');
+        if (panelEl) {
+          const sc = panelEl.querySelector('.an-scroll');
+          const pstep = {ArrowDown: 120, PageDown: 400, ArrowUp: -120, PageUp: -400}[e.key] || 0;
+          if (sc && pstep) { e.preventDefault(); sc.scrollTop += pstep; return; }
+        }
+        if (L.stage === 'hub') return;
+        const panMax = targets(L, 0).fan?.panMax || 0;
+        if (!panMax) return;
+        const step = {ArrowDown: 120, PageDown: 400, ArrowUp: -120, PageUp: -400}[e.key] || 0;
+        if (step) { e.preventDefault(); L.panY = clamp((L.panY || 0) + step, 0, panMax); setPanned(true); return; }
+        if (e.key === 'Home') { e.preventDefault(); L.panY = 0; return; }
+        if (e.key === 'End') { e.preventDefault(); L.panY = panMax; setPanned(true); }
+        return;
+      }
+      if (sel) setFocus({mod, zone, sel: null});
+      else if (zone) setFocus(zone.includes('/') ? {mod, zone: zone.split('/').slice(0, -1).join('/') || null} : {mod, zone: null});
+      else if (mod) setFocus({mod: null, sel: null});
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [mod, sel, setFocus]);
+  }, [mod, zone, sel, setFocus]);
 
   const go = useCallback(id => {
     const n = graph.index.get(id), m = moduleOf(n);
-    if (m) setFocus({mod: m.id, sel: id});
+    if (!m) return;
+    // 落到笔记真实所在的目录层（分区 + 完整子路径），层卡链与面包屑随之完整展开
+    const z = n.kind === 'note' && String(n.folder || '').startsWith('f:kb:')
+      ? [n.folder.slice(5), n.subzone].filter(Boolean).join('/') || null : null;
+    setFocus({mod: m.id, zone: m.id === 'kb' ? z : null, sel: id});
   }, [graph, setFocus]);
   const replay = () => {
     const L = live.current, now = performance.now();
@@ -437,21 +719,34 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   return <section ref={stageRef} className={`home-stage stage-${stage} ${live.current.introSeen ? 'intro-done' : ''}`} aria-label="创作神经图谱">
     <div className="stage-bg"/>
     <NetworkCanvas graph={graph} layout={layout} live={live} reduced={reduced}/>
-    <Scene graph={graph} items={stage === 'hub' ? [] : items} sel={sel} live={live} onModule={id => setFocus({mod: id === mod && stage !== 'hub' ? mod : id, sel: null})} onItem={id => setFocus({mod, sel: id})}/>
+    <Scene graph={graph} items={stage === 'hub' ? [] : items} sel={sel} live={live} zonePath={zonePath} ancLevels={ancLevels} zone={zone} onModule={id => setFocus({mod: id === mod && stage !== 'hub' ? mod : id, zone: null, sel: null})} onItem={n => {
+      if (n.kind === 'folder' && mod === 'kb') {           // 分区/子目录卡：按卡上的完整路径往里钻一层
+        setFocus({mod, zone: n.path, sel: null});
+      } else if (n.kind !== 'ghost') {
+        setFocus({mod, zone, sel: n.id});
+      }
+    }}/>
 
     <div className="hub-copy" aria-hidden={stage !== 'hub'}>
       <p className="eyebrow">{CONFIG.brand.name} · {CONFIG.brand.sub} <span>{CONFIG.brand.tagline}</span></p>
-      <h1>让每一条链接，<br/>双向生长。</h1>
-      <p className="hub-en">Every link grows both ways.</p>
+      <h1>人间有味是清欢。</h1>
+      <p className="hub-en">My ecosystem, rendered live.</p>
       <p className="hub-meta">{MODULES.length} 个模块 <em>modules</em> · {s.content} 条内容 <em>notes</em> · {s.links} 条连接 <em>links</em></p>
       <p className="hub-hint">点击水母，展开模块 · <em>Tap a jellyfish to expand</em></p>
     </div>
 
     {stage !== 'hub' && <nav className="crumbs" aria-label="图谱路径">
-      <button className="crumb-back" onClick={() => setFocus(sel ? {mod, sel: null} : {mod: null, sel: null})} aria-label="返回上一层"><Icon name="back" size={16}/></button>
+      <button className="crumb-back" onClick={() => setFocus(sel ? {mod, zone, sel: null} : zone ? (zone.includes('/') ? {mod, zone: zone.split('/').slice(0, -1).join('/') || null} : {mod, zone: null}) : {mod: null, sel: null})} aria-label="返回上一层"><Icon name="back" size={16}/></button>
       <button onClick={() => setFocus({mod: null, sel: null})}>创作空间 <em>Core</em></button>
       <span>/</span>
-      <button onClick={() => setFocus({mod, sel: null})} style={{color: MOD_STYLE[mod].color}}>{m.title} <em>{m.en}</em></button>
+      <button onClick={() => setFocus({mod, zone: null, sel: null})} style={{color: MOD_STYLE[mod].color}}>{m.title} <em>{m.en}</em></button>
+      {zone && <><span>/</span>
+        {zone.split('/').map((seg, i) => {
+          const z = zone.split('/').slice(0, i + 1).join('/');
+          return <React.Fragment key={z}>{i > 0 && <span>/</span>}
+            <button onClick={() => setFocus({mod, zone: z, sel: null})}>{seg}</button>
+          </React.Fragment>;
+        })}</>}
       {node && <><span>/</span><b>{node.short || node.title}</b></>}
     </nav>}
 
@@ -463,14 +758,28 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
 
     {stage === 'hub' && <div className="legend glass" aria-label="图例">
       <h3>图例 <em>Legend</em></h3>
-      {['post', 'note', 'idea', 'draft', 'concept', 'tag', 'ghost'].map(k => <div key={k}><i style={{'--kc': KINDS[k].color}} className={k === 'ghost' ? 'ghost' : ''}/>{KINDS[k].label} <em>{KINDS[k].en}</em><b>{graph.nodes.filter(n => n.kind === k).length}</b></div>)}
+      {['task', 'note', 'decision', 'memory', 'service', 'tag', 'ghost'].map(k => <div key={k}><i style={{'--kc': KINDS[k].color}} className={k === 'ghost' ? 'ghost' : ''}/>{KINDS[k].label} <em>{KINDS[k].en}</em><b>{graph.nodes.filter(n => n.kind === k).length}</b></div>)}
       <div className="legend-lines"><span><i className="ln mutual"/>双向 <em>Mutual</em></span><span><i className="ln one"/>单向 <em>One-way</em></span></div>
     </div>}
     {stage === 'hub' && <Dock graph={graph} onGo={go}/>}
-    {stage === 'module' && <p className="module-hint">选择一篇笔记查看全部分析 · <em>Select a note to see its full analysis</em></p>}
+    {/* 宽屏 kb 钻取时层级轨迹已由画布上的横排胶囊承担，这里只在窄屏显示，避免两套面包屑重复 */}
+    {zoneChain && stage === 'module' && size.w < 760 && <div className="zone-trail" aria-label="层级轨迹">
+      {zoneChain.map((c, i) => (
+        <React.Fragment key={c.zone || 'root'}>
+          {i > 0 && <span className="zt-arrow">›</span>}
+          <button className={`zt-card${i === zoneChain.length - 1 ? ' cur' : ''}`}
+            onClick={() => setFocus({mod: 'kb', zone: c.zone, sel: null})}>
+            <b>{c.name}</b><em>{c.n} 篇</em>
+          </button>
+        </React.Fragment>
+      ))}
+    </div>}
+    {stage === 'module' && !panned && (targets(live.current, 0).fan?.panMax || 0) > 0 && <div className="pan-hint" aria-hidden="true">▼ 滚轮往下平移清单 <em>{items.length} 条</em></div>}
+
+    {stage === 'module' && <p className="module-hint">{mod === 'kb' && !zone ? '选择一个分区进入' : mod === 'kb' ? '点目录进入下一层 · 点笔记查看全部分析' : '选择一篇笔记查看全部分析'} · <em>Select to explore</em></p>}
 
     {node && <aside className="analysis-wrap" key={sel}>
-      <Analysis graph={graph} node={node} module={m} onGo={go} onAction={onAction} onClose={() => setFocus({mod, sel: null})}/>
+      <Analysis graph={graph} node={node} module={m} onGo={go} onAction={onAction} onClose={() => setFocus({mod, zone, sel: null})}/>
     </aside>}
   </section>;
 }

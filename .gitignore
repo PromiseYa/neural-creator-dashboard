@@ -11,3 +11,7 @@ src/data/my-data.js
 !.env.example
 *.pem
 *.key
+
+# local machine runbook + e2e scratch
+LOCAL.md
+.artifacts/

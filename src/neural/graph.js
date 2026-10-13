@@ -1,21 +1,24 @@
-// 神经图谱数据：全部由 src/data/sample.js 的资料在浏览器中推导，不读取任何外部仓库。
-// 连接来源：笔记正文 [[双链]]、目录归属、选题转草稿记录、作品话题标签、正文提及的概念词，
-// 以及两篇内容共同提及 ≥2 个概念时形成的「双向共振」。
-import {posts, workContent} from './works';
-import {notes as notesRaw, concepts as CONCEPTS} from '../data';
+// 神经图谱数据：任务/拍板/记忆/服务来自工作站实时接口，知识库笔记来自本地现场扫描。
+// 连接来源：笔记正文 [[双链]]、目录归属、话题标签（KB 标签自动聚类，概念词表已废弃）。
 import {CONFIG} from '../config';
 import {T} from './theme';
 
+export const STATUS_ZH = {pending: '待办', dispatched: '已派', doing: '进行中', waiting_confirm: '待确认', review: '待复核'};
+
 export const KINDS = {
-  core: {label: '创作空间', en: 'Core', color: T.kinds.core},
-  folder: {label: '目录', en: 'Folder', color: T.kinds.folder},
+  core: {label: '数字生态', en: 'Core', color: T.kinds.core},
+  folder: {label: '分区', en: 'Zone', color: T.kinds.folder},
   post: {label: '作品', en: 'Work', color: T.kinds.post},
-  note: {label: '方法笔记', en: 'Method note', color: T.kinds.note},
+  note: {label: '知识笔记', en: 'Knowledge note', color: T.kinds.note},
   idea: {label: '选题', en: 'Idea', color: T.kinds.idea},
   draft: {label: '草稿', en: 'Draft', color: T.kinds.draft},
   concept: {label: '概念', en: 'Concept', color: T.kinds.concept},
   tag: {label: '话题', en: 'Topic', color: T.kinds.tag},
-  ghost: {label: '未创建', en: 'Unresolved', color: T.kinds.ghost}
+  ghost: {label: '未创建', en: 'Unresolved', color: T.kinds.ghost},
+  task: {label: '任务', en: 'Task', color: T.kinds.task},
+  decision: {label: '拍板', en: 'Decision', color: T.kinds.decision},
+  memory: {label: '记忆', en: 'Memory', color: T.kinds.memory},
+  service: {label: '服务', en: 'Service', color: T.kinds.service}
 };
 export const LINK_KINDS = {
   contain: '目录归属',
@@ -29,27 +32,26 @@ export const LINK_EN = {contain: 'Contains', wiki: 'Wikilink', source: 'Source',
 export const CONTENT = new Set(['post', 'note', 'idea', 'draft']);
 
 const FOLDERS = [
-  {id: 'f:works', title: '作品库', path: '02-作品库', angle: 180},
-  {id: 'f:drafts', title: '创作台', path: '03-创作台', angle: 145},
-  {id: 'f:ideas', title: '选题池', path: '04-选题池', angle: 35},
-  {id: 'f:methods', title: '方法库', path: '05-方法库 methods', angle: 0}
+  {id: 'f:tasks', title: '任务流', path: '工作站/任务', angle: 180},
+  {id: 'f:kb', title: '知识库', path: 'KnowledgeBase', angle: 0},
+  {id: 'f:decisions', title: '拍板台', path: '工作站/拍板', angle: 35},
+  {id: 'f:memory', title: '记忆池', path: 'memorycore', angle: 145},
+  {id: 'f:services', title: '服务舱', path: 'services', angle: -90}
 ];
 
 // 首页围绕光球的五个模块；角度与图谱布局的目录锚点一致，背景网络会朝各自模块蔓延。
 export const MODULES = [
-  {id: 'works', title: '作品库', en: 'Works', kind: 'post', folder: 'f:works', angle: 180, icon: 'works', page: 'library'},
-  {id: 'concepts', title: '概念网络', en: 'Concepts', kind: 'concept', angle: -90, icon: 'concept'},
-  {id: 'methods', title: '方法库', en: 'Methods', kind: 'note', folder: 'f:methods', angle: 0, icon: 'methods'},
-  {id: 'ideas', title: '选题池', en: 'Ideas', kind: 'idea', folder: 'f:ideas', angle: 35, icon: 'idea', page: 'ideas'},
-  {id: 'drafts', title: '创作台', en: 'Drafts', kind: 'draft', folder: 'f:drafts', angle: 145, icon: 'draft', page: 'drafts'}
+  {id: 'tasks', title: '任务流', en: 'Tasks', kind: 'task', folder: 'f:tasks', angle: 180, icon: 'works'},
+  {id: 'kb', title: '知识库', en: 'Knowledge', kind: 'note', folder: 'f:kb', angle: 0, icon: 'methods'},
+  {id: 'decisions', title: '拍板台', en: 'Decisions', kind: 'decision', folder: 'f:decisions', angle: 35, icon: 'idea'},
+  {id: 'memory', title: '记忆池', en: 'Memory', kind: 'memory', folder: 'f:memory', angle: 145, icon: 'draft'},
+  {id: 'services', title: '服务舱', en: 'Services', kind: 'service', folder: 'f:services', angle: -90, icon: 'concept'}
 ];
 export const moduleOf = node => MODULES.find(m => m.kind === node?.kind) || null;
 
 export const cleanTitle = t => String(t || '').replace(/^\d+[A-Z]?-☑️/, '').replace(/^\d+-/, '').replace(/_/g, ' · ');
-const contentOf = id => workContent.find(c => c.title === posts.find(p => p.id === id)?.title);
-export const postMedia = post => contentOf(post.id) || null;
 
-export function buildGraph({ideas = [], drafts = []} = {}) {
+export function buildGraph({tasks = [], decisions = [], memories = [], services = [], notes = []} = {}) {
   const nodes = new Map();
   const add = n => { if (!nodes.has(n.id)) nodes.set(n.id, {tags: [], text: '', ...n}); return nodes.get(n.id); };
   const edges = new Map();
@@ -66,88 +68,88 @@ export function buildGraph({ideas = [], drafts = []} = {}) {
   add({id: 'core', kind: 'core', title: CONFIG.workspace, path: '/', text: ''});
   for (const f of FOLDERS) { add({...f, kind: 'folder'}); link('core', f.id, 'contain'); }
 
-  // 作品：指标、正文和话题。
-  for (const p of posts) {
-    const c = contentOf(p.id);
-    add({id: 'post:' + p.id, kind: 'post', title: p.title, short: p.title.replace(/^Obsidian[：:]/, ''), path: '02-作品库/' + p.title, folder: 'f:works', text: p.title + '\n' + (c?.body || ''), body: c?.body || '', date: p.date, post: p, media: c?.media, cover: c?.cover, tags: c?.tags || []});
-    link('f:works', 'post:' + p.id, 'contain');
+  // 任务流：工作站实体投影（实时，只读）
+  for (const t of tasks) {
+    const id = 'task:' + t.id;
+    add({id, kind: 'task', title: `${t.id} ${t.title}`, short: t.title.length > 22 ? t.title.slice(0, 22) + '…' : t.title,
+      path: `任务流/${t.id}`, folder: 'f:tasks', text: `${t.id} ${t.title} ${STATUS_ZH[t.status] || t.status || ''} ${t.priority || ''}`, task: t, date: t.updated_at});
+    link('f:tasks', id, 'contain');
   }
 
-  // 方法库笔记与子目录。
-  for (const n of notesRaw) {
-    const parts = n.path.split('/');
-    const sub = parts[1];
-    const subId = 'f:' + sub;
-    add({id: subId, kind: 'folder', title: sub.replace(/^\d+-/, '').replace(/\s+[a-z-]+$/i, ''), path: parts.slice(0, 2).join('/'), level: 2});
-    link('f:methods', subId, 'contain');
+  // 知识库：本地现场扫描的笔记，按一级分区挂子锚点
+  for (const n of notes) {
+    const zoneTitle = String(n.zone || '根区').replace(/^\d+-/, '');
+    const zoneId = 'f:kb:' + zoneTitle;
+    add({id: zoneId, kind: 'folder', title: zoneTitle, path: n.zone || 'KB', level: 2});
+    link('f:kb', zoneId, 'contain');
     const id = 'note:' + n.id;
-    add({id, kind: 'note', title: n.title, short: cleanTitle(n.title), path: n.path, folder: subId, text: n.title + '\n' + n.body, body: n.body});
-    link(subId, id, 'contain');
+    add({id, kind: 'note', title: n.title, short: n.title.length > 22 ? n.title.slice(0, 22) + '…' : n.title,
+      path: n.path, folder: zoneId, subzone: n.subzone || '', text: n.title + '\n' + (n.body || ''), body: n.body || '',
+      tags: n.tags || [], updated: n.updated, wikilinks: n.wikilinks || []});
+    link(zoneId, id, 'contain');
   }
 
-  for (const i of ideas) {
-    add({id: 'idea:' + i.id, kind: 'idea', title: i.title || '未命名选题', short: i.title, path: '04-选题池/' + i.title, folder: 'f:ideas', text: i.title + '\n' + (i.note || ''), idea: i});
-    link('f:ideas', 'idea:' + i.id, 'contain');
-  }
-  for (const d of drafts) {
-    add({id: 'draft:' + d.id, kind: 'draft', title: d.title || '未命名草稿', short: d.title, path: '03-创作台/正在写/' + d.title, folder: 'f:drafts', text: d.title + '\n' + (d.body || ''), body: d.body || '', draft: d});
-    link('f:drafts', 'draft:' + d.id, 'contain');
-  }
-
-  // 选题 ⇄ 草稿：草稿记录来源选题；选题状态为「已转草稿」时反向也成立。
-  for (const d of drafts) {
-    if (d.source == null) continue;
-    const idea = ideas.find(i => i.id === d.source);
-    if (!idea) continue;
-    link('draft:' + d.id, 'idea:' + idea.id, 'source');
-    if (idea.status === '已转草稿') link('idea:' + idea.id, 'draft:' + d.id, 'source');
+  // 拍板台：待拍板清单（实时，只读）
+  for (const dc of decisions) {
+    const id = 'dec:' + dc.id;
+    add({id, kind: 'decision', title: `${dc.id} ${dc.title || '未命名'}`, short: String(dc.title || '未命名').slice(0, 22),
+      path: `拍板台/${dc.id}`, folder: 'f:decisions', text: `${dc.id} ${dc.title || ''} ${(dc.options || []).map(o => o.text || o.key || '').join(' ')}`, decision: dc, date: dc.created_at});
+    link('f:decisions', id, 'contain');
   }
 
-  // [[双链]]：方法库笔记与草稿正文。能对应到现有内容即为实链，否则是「未创建」笔记。
+  // 记忆池：M2 接 memorycore 池状态
+  for (const mm of memories) {
+    const id = 'mem:' + mm.id;
+    add({id, kind: 'memory', title: mm.title || mm.id, short: String(mm.title || mm.id).slice(0, 22), path: `记忆池/${mm.id}`, folder: 'f:memory', text: `${mm.title || ''}\n${mm.body || ''}`, body: mm.body || '', memory: mm});
+    link('f:memory', id, 'contain');
+  }
+
+  // 服务舱：健康探测结果
+  for (const s of services) {
+    const id = 'svc:' + s.id;
+    add({id, kind: 'service', title: s.name, short: s.name, path: `服务舱/${s.id}`, folder: 'f:services', text: `${s.name} ${s.desc || ''}`, service: s});
+    link('f:services', id, 'contain');
+  }
+
+  // [[双链]]：优先用扫描时预抽取的链接清单，正文现场匹配兜底；找不到目标记为「未创建」。
   const byName = new Map();
   for (const n of nodes.values()) if (CONTENT.has(n.kind)) {
     byName.set(String(n.title).toLowerCase(), n.id);
-    if (n.path) byName.set(n.path.split('/').pop().replace(/\.md$/, '').toLowerCase(), n.id);
+    if (n.path) byName.set(String(n.path).split('/').pop().replace(/\.md$/, '').toLowerCase(), n.id);
   }
   for (const n of [...nodes.values()]) {
     if (n.kind !== 'note' && n.kind !== 'draft') continue;
-    for (const m of (n.body || '').matchAll(/\[\[([^\]]+)\]\]/g)) {
-      const [target, alias] = m[1].split('|');
-      if (target.includes('{{')) continue;
-      const name = target.split('#')[0].split('/').pop().trim();
-      if (!name) continue;
+    const targets = new Set(n.wikilinks || []);
+    for (const m of (n.body || '').matchAll(/\[\[([^\]]+)\]\]/g)) targets.add(m[1].split('|')[0].split('#')[0].trim());
+    for (const raw of targets) {
+      const name = String(raw).split('/').pop().trim();
+      if (!name || name.includes('{{')) continue;
       let id = byName.get(name.toLowerCase());
       if (!id) {
         id = 'ghost:' + name.toLowerCase();
-        add({id, kind: 'ghost', title: alias?.trim() || name, short: alias?.trim() || cleanTitle(name), path: target.trim() + '.md', text: ''});
+        add({id, kind: 'ghost', title: name, short: cleanTitle(name), path: name + '.md', text: ''});
       }
       link(n.id, id, 'wiki');
     }
   }
 
-  // 话题标签（大小写合并）。
+  // 话题标签（大小写合并；只保留被 ≥3 篇共用的 tag，单笔记最多挂 4 个最高频 tag——连线瘦身后知识网络才读得清）。
+  const tagFreq = new Map();
   for (const n of [...nodes.values()]) for (const tag of n.tags || []) {
-    const id = 'tag:' + tag.toLowerCase();
-    add({id, kind: 'tag', title: '#' + tag, short: '#' + tag, text: ''});
-    link(n.id, id, 'tag');
+    const k = tag.toLowerCase();
+    tagFreq.set(k, (tagFreq.get(k) || 0) + 1);
+  }
+  for (const n of [...nodes.values()]) {
+    const top = (n.tags || []).map(t => t.toLowerCase()).filter(k => tagFreq.get(k) >= 3)
+      .sort((a, b) => tagFreq.get(b) - tagFreq.get(a)).slice(0, 4);
+    for (const k of top) {
+      const id = 'tag:' + k;
+      add({id, kind: 'tag', title: '#' + k, short: '#' + k, text: '', freq: tagFreq.get(k)});
+      link(n.id, id, 'tag');
+    }
   }
 
-  // 概念提及 + 双向共振（概念词表见 src/data/sample.js）。
-  const content = [...nodes.values()].filter(n => CONTENT.has(n.kind));
-  const mentions = new Map();
-  for (const [name, terms] of CONCEPTS) {
-    const hits = content.filter(n => terms.some(t => n.text.toLowerCase().includes(t)));
-    if (hits.length < 2) continue;
-    const id = 'concept:' + name;
-    add({id, kind: 'concept', title: name, short: name, text: '', terms});
-    for (const h of hits) { link(h.id, id, 'mention'); mentions.set(h.id, [...(mentions.get(h.id) || []), name]); }
-  }
-  for (let i = 0; i < content.length; i++) for (let j = i + 1; j < content.length; j++) {
-    const A = mentions.get(content[i].id) || [], B = mentions.get(content[j].id) || [];
-    const shared = A.filter(x => B.includes(x));
-    if (shared.length >= 2) { link(content[i].id, content[j].id, 'resonance', shared.length); link(content[j].id, content[i].id, 'resonance', shared.length); }
-  }
-
+  // 概念词表/正文提及/双向共振已随固定词表一起移除：KB 标签（tag 节点）承担概念聚类。
   const list = [...nodes.values()];
   const links = [...edges.values()].map(e => ({...e, both: e.ab > 0 && e.ba > 0, s: e.ab ? e.a : e.b, t: e.ab ? e.b : e.a}));
   for (const n of list) { n.out = 0; n.in = 0; n.deg = 0; n.mutual = 0; }
@@ -159,7 +161,6 @@ export function buildGraph({ideas = [], drafts = []} = {}) {
     if (l.both) { A.mutual++; B.mutual++; A.out++; B.out++; A.in++; B.in++; }
     else { idx.get(l.s).out++; idx.get(l.t).in++; }
   }
-  for (const n of list) n.shared = mentions.get(n.id) || [];
   return {nodes: list, links, index: idx};
 }
 
@@ -182,7 +183,7 @@ export function neighbors(graph, id) {
 // 二度关联：没有直接相连，但共享概念或话题的内容。
 export function latent(graph, id) {
   const near = new Set([id, ...graph.links.filter(l => l.a === id || l.b === id).map(l => l.a === id ? l.b : l.a)]);
-  const hubs = graph.links.filter(l => (l.a === id || l.b === id) && (l.kind === 'mention' || l.kind === 'tag')).map(l => l.a === id ? l.b : l.a);
+  const hubs = graph.links.filter(l => (l.a === id || l.b === id) && l.kind === 'tag').map(l => l.a === id ? l.b : l.a);
   const score = new Map();
   for (const h of hubs) for (const l of graph.links) {
     if (l.a !== h && l.b !== h) continue;
@@ -287,22 +288,34 @@ export function askGraph(graph, question, scope) {
   const real = graph.links.filter(l => l.kind !== 'contain');
   const name = id => graph.index.get(id)?.short || graph.index.get(id)?.title;
   const cards = [];
-  if (/孤|没有连接|没链接|零散|断开/.test(q)) {
+  if (/任务|未结|在办|待办/.test(q)) {
+    const T = graph.nodes.filter(n => n.kind === 'task');
+    const bySt = {};
+    for (const t of T) bySt[t.task.status] = (bySt[t.task.status] || 0) + 1;
+    cards.push({tone: 'info', title: `未结任务 ${T.length} 条`, en: 'Open tasks', text: Object.entries(bySt).map(([k, v]) => `${STATUS_ZH[k] || k} ${v}`).join(' · ') || '当前没有未结任务。', items: T.map(n => n.id)});
+  } else if (/拍板|决策/.test(q)) {
+    const D = graph.nodes.filter(n => n.kind === 'decision');
+    cards.push({tone: D.length ? 'warn' : 'info', title: `待拍板 ${D.length} 条`, en: 'Pending decisions', text: D.length ? '三门槛落账的待拍事项，点卡片直达。' : '当前没有待拍板事项。', items: D.map(n => n.id)});
+  } else if (/服务|健康|在线/.test(q)) {
+    const S = graph.nodes.filter(n => n.kind === 'service');
+    const down = S.filter(n => !n.service.ok);
+    cards.push({tone: down.length ? 'warn' : 'info', title: `服务健康 ${S.length - down.length}/${S.length}`, en: 'Services', text: down.length ? `离线：${down.map(n => n.title).join('、')}` : '全部在线。', items: S.map(n => n.id)});
+  } else if (/孤|没有连接|没链接|零散|断开/.test(q)) {
     const lonely = C.filter(n => !real.some(l => l.a === n.id || l.b === n.id));
     const weak = C.filter(n => n.in === 0 && !lonely.includes(n));
     cards.push({tone: 'warn', title: '孤立内容', en: 'Isolated', text: lonely.length ? `${lonely.length} 条内容除了目录外没有任何连接。` : '没有完全孤立的内容。', items: lonely.map(n => n.id)});
     cards.push({tone: 'info', title: '没有反链的内容', en: 'No backlinks', text: `${weak.length} 条内容只向外链接，还没有被其他内容引用。`, items: weak.slice(0, 8).map(n => n.id)});
   } else if (/双向|互链|共振|互相/.test(q)) {
     const mutual = real.filter(l => l.both).sort((a, b) => b.w - a.w);
-    cards.push({tone: 'gold', title: '双向连接', en: 'Bidirectional', text: `共 ${mutual.length} 组：正文共同提及 ≥2 个概念，或选题与草稿互相记录。`, pairs: mutual.slice(0, 8).map(l => [l.a, l.b, l.kind === 'resonance' ? `共同提及 ${l.w} 个概念` : LINK_KINDS[l.kind]])});
+    cards.push({tone: 'gold', title: '双向连接', en: 'Bidirectional', text: `共 ${mutual.length} 组：互相 [[双链]] 的笔记对。`, pairs: mutual.slice(0, 8).map(l => [l.a, l.b, LINK_KINDS[l.kind]])});
   } else if (/未创建|空链|断链|缺/.test(q)) {
     const ghosts = graph.nodes.filter(n => n.kind === 'ghost');
     cards.push({tone: 'warn', title: '未创建的笔记', en: 'Unresolved links', text: `${ghosts.length} 个 [[双链]] 指向尚未在看板资料中出现的笔记，多来自生成模板。`, items: ghosts.map(n => n.id)});
   } else if (/核心|枢纽|中心|最重要|反链最多|被引用/.test(q)) {
     const top = [...C].sort((a, b) => (b.in + b.mutual) - (a.in + a.mutual) || b.deg - a.deg).slice(0, 6);
     cards.push({tone: 'gold', title: '连接最密的内容', en: 'Most connected', text: '按反链与双向连接数排序。', items: top.map(n => n.id), meta: top.map(n => `${n.deg} 条连接`)});
-    const hubs = graph.nodes.filter(n => n.kind === 'concept').sort((a, b) => b.deg - a.deg).slice(0, 5);
-    cards.push({tone: 'info', title: '最常被提及的概念', en: 'Top concepts', text: hubs.map(h => `${h.title}（${h.deg}）`).join('、'), items: hubs.map(n => n.id)});
+    const hubs = graph.nodes.filter(n => n.kind === 'tag').sort((a, b) => b.deg - a.deg).slice(0, 5);
+    cards.push({tone: 'info', title: '最常用的话题', en: 'Top topics', text: hubs.map(h => `${h.title}（${h.deg}）`).join('、'), items: hubs.map(n => n.id)});
   } else if (/下一篇|写什么|选题|延伸/.test(q)) {
     for (const idea of C.filter(n => n.kind === 'idea')) {
       const rel = latent(graph, idea.id).filter(r => graph.index.get(r.id).kind === 'post');

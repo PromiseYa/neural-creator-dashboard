@@ -2,13 +2,13 @@
 import {asset} from '../config';
 
 export const T = {
-  kinds: {core: '#ecd9a6', folder: '#d9b6c1', post: '#c0b8ef', note: '#a9dccb', idea: '#e8c48c', draft: '#a9d3e4', concept: '#e4e6e8', tag: '#98a6a1', ghost: '#70746f'},
+  kinds: {core: '#ecd9a6', folder: '#d9b6c1', post: '#c0b8ef', note: '#a9dccb', idea: '#e8c48c', draft: '#a9d3e4', concept: '#e4e6e8', tag: '#98a6a1', ghost: '#70746f', task: '#c3bcf2', decision: '#e8c48c', memory: '#a9d3e4', service: '#7ddc9a'},
   modules: {
-    works: {color: '#c3bcf2', filter: 'hue-rotate(215deg) saturate(1.1)'},
-    concepts: {color: '#e2e5e8', filter: 'hue-rotate(185deg) saturate(.3) brightness(1.15)'},
-    methods: {color: '#ace0cf', filter: 'hue-rotate(118deg) saturate(1)'},
-    ideas: {color: '#ecc98f', filter: 'saturate(1)'},
-    drafts: {color: '#acd6e8', filter: 'hue-rotate(158deg) saturate(1.05)'}
+    tasks: {color: '#c3bcf2', filter: 'hue-rotate(215deg) saturate(1.1)'},
+    kb: {color: '#ace0cf', filter: 'hue-rotate(118deg) saturate(1)'},
+    decisions: {color: '#ecc98f', filter: 'saturate(1)'},
+    memory: {color: '#acd6e8', filter: 'hue-rotate(158deg) saturate(1.05)'},
+    services: {color: '#e2e5e8', filter: 'hue-rotate(185deg) saturate(.3) brightness(1.15)'}
   },
   media: {orb: asset('media/orb.mp4'), orbPoster: asset('media/orb.jpg'), jelly: asset('media/jellyfish.mp4'), jellyPoster: asset('media/jellyfish.jpg')},
   pulse: {out: ['#fffaf0', '#ecd39e'], in: ['#ffffff', '#e3b3c4']},
