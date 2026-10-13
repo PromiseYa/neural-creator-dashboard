@@ -864,6 +864,19 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   const m = MODULES.find(x => x.id === mod);
   const s = stats(graph);
 
+  // 流水顶部：贴着左上提示行"点击水母，展开模块"的下方（实测其底缘+间距，随窗口缩放复量）
+  const [streamTop, setStreamTop] = useState(360);
+  useEffect(() => {
+    const calc = () => {
+      const h = document.querySelector('.hub-hint');
+      if (h && h.getBoundingClientRect().bottom > 0) setStreamTop(Math.round(h.getBoundingClientRect().bottom + 14));
+    };
+    calc();
+    const t = setTimeout(calc, 900);   // 首帧后标题/字体定稿再复量一次
+    window.addEventListener('resize', calc);
+    return () => { clearTimeout(t); window.removeEventListener('resize', calc); };
+  }, []);
+
   return <section ref={stageRef} className={`home-stage stage-${stage} ${live.current.introSeen ? 'intro-done' : ''}`} aria-label="创作神经图谱">
     <div className="stage-bg"/>
     <NetworkCanvas graph={graph} layout={layout} live={live} reduced={reduced}/>
@@ -912,8 +925,8 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
       <div className="legend-lines"><span><i className="ln mutual"/>双向 <em>Mutual</em></span><span><i className="ln one"/>单向 <em>One-way</em></span></div>
     </div>}
     {stage === 'hub' && <Dock graph={graph} onGo={go}/>}
-    {/* 流水：全视图固定左侧（左上文案下方起、垂到屏幕底），随时可查；面板内滚轮/触屏滚动，底部渐隐 */}
-    <EcoStream events={ecoEvents} top={Math.round(Math.max(360, size.h * .3))}/>
+    {/* 流水：全视图固定左侧，顶部贴左上提示行下方；面板内可滚（滚轮/触屏，滚动条隐藏），底部渐隐 */}
+    <EcoStream events={ecoEvents} top={streamTop}/>
     {/* 宽屏 kb 钻取时层级轨迹已由画布上的横排胶囊承担，这里只在窄屏显示，避免两套面包屑重复 */}
     {zoneChain && stage === 'module' && size.w < 760 && <div className="zone-trail" aria-label="层级轨迹">
       {zoneChain.map((c, i) => (
