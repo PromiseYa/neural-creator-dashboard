@@ -108,9 +108,9 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         const p = Math.min(p1, p2) * grow;
         if (p <= .02) continue;
         const on = !hl || (hl.has(k.l.a) && hl.has(k.l.b));
-        let a = (k.l.both ? .32 : k.l.kind === 'wiki' ? .3 : k.l.kind === 'contain' ? .16 : .11) * p * (on ? 1 : .25) * (hl && on ? 2.2 : 1);
+        let a = (k.l.both ? .38 : k.l.kind === 'wiki' ? .5 : k.l.kind === 'contain' ? .16 : .16) * p * (on ? 1 : .25) * (hl && on ? 2.2 : 1);
         ctx.strokeStyle = k.l.both ? `rgba(${P.mutual},${a})` : k.l.kind === 'wiki' ? `rgba(${P.wiki},${a})` : `rgba(${P.link},${a})`;
-        ctx.lineWidth = k.l.both ? .6 + Math.min(k.l.w, 6) * .22 : .7;
+        ctx.lineWidth = k.l.both ? .6 + Math.min(k.l.w, 6) * .22 : .9;
         ctx.beginPath(); ctx.moveTo(x1, y1);
         if (k.l.both) { const mx = (x1 + x2) / 2 + (y2 - y1) * .12, my = (y1 + y2) / 2 - (x2 - x1) * .12; ctx.quadraticCurveTo(mx, my, x2, y2); }
         else ctx.lineTo(x2, y2);
@@ -155,13 +155,23 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         ctx.globalAlpha = a;
         if (x.n.kind === 'ghost') { ctx.setLineDash([2, 2]); ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(px, py, r + 1, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
         else ctx.drawImage(orbSprite(color, P.light), px - r, py - r, r * 2, r * 2);
-        if (L.stage === 'hub' && p > .9 && (x.n.kind === 'folder' || (hlLabel && hlLabel.has(x.n.id) && on))) {
-          // 分区锚点名：主展示文字之一，稍大稍亮+微光晕，保证在星云里读得清
-          ctx.globalAlpha = a * (x.n.kind === 'folder' ? .95 : .8);
-          ctx.fillStyle = P.label; ctx.font = `${x.n.kind === 'folder' ? 12.5 : 10.5}px -apple-system, "PingFang SC", sans-serif`;
-          ctx.shadowColor = 'rgba(0, 0, 0, .8)'; ctx.shadowBlur = 5;
-          ctx.fillText((x.n.short || x.n.title).slice(0, 14), px + r + 5, py + 3.5);
-          ctx.shadowBlur = 0;
+        if (L.stage === 'hub' && p > .9) {
+          // 标签分层（Obsidian 图谱式星系感）：锚点常亮；内容节点平时浅浅显示文字（看得出第二层的模糊感），
+          // 悬停某模块时命中类与其关联节点提亮、其余近乎隐去——中心与外围拉开对比
+          const isFolder = x.n.kind === 'folder';
+          const isDoneTask = x.n.kind === 'task' && x.n.task?.status === 'done';
+          const inHl = hl && hl.has(x.n.id);
+          const la = isFolder ? .95
+            : hl ? (inHl ? .92 : .05)
+            : .36;
+          if (!isDoneTask && la > .06) {
+            ctx.globalAlpha = a * la;
+            ctx.fillStyle = P.label;
+            ctx.font = `${isFolder ? 12.5 : 9.5}px -apple-system, "PingFang SC", sans-serif`;
+            if (isFolder) { ctx.shadowColor = 'rgba(0, 0, 0, .8)'; ctx.shadowBlur = 5; }
+            ctx.fillText((x.n.short || x.n.title).slice(0, isFolder ? 14 : 10), px + r + 4, py + 3);
+            ctx.shadowBlur = 0;
+          }
         }
         ctx.globalAlpha = 1;
       }
