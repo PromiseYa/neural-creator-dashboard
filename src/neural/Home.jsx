@@ -303,7 +303,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   const dustRef = useRef(null);
   const orbRef = useRef(null), jellyRefs = useRef({}), innerRefs = useRef({}), labelRefs = useRef({}), threadRefs = useRef({}), pulseRefs = useRef({}), sceneRef = useRef(null);
   const itemRefs = useRef([]), fanRefs = useRef([]), fanPulseRefs = useRef([]);
-  const aItemRefs = useRef([]), aThreadRefs = useRef([]);
+  const aItemRefs = useRef([]), aThreadRefs = useRef([]), aThreadPulseRefs = useRef([]);
   const vids = useRef({});
   const vidRef = (id, part) => el => { (vids.current[id] ||= {})[part] = el; };
   const summaries = useMemo(() => Object.fromEntries(MODULES.map(m => [m.id, moduleSummary(graph, m)])), [graph]);
@@ -432,6 +432,14 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
             const ey = y + 15 * sc, mx = (src.x + x) / 2;
             p.setAttribute('d', `M${src.x},${src.y} C${mx},${src.y} ${mx},${ey} ${x - 4},${ey}`);
             p.style.opacity = clamp(Math.min(o, src.o), 0, 1) * (tp.path ? .85 : .4);
+            // 链线上的流动脉冲（与扇形触须同款）：水母→分类→内容 逐级接力，链路"活"起来
+            const pc = aThreadPulseRefs.current[k]?.[i];
+            if (pc) {
+              const u = (t * .22 + i * .37 + k * .5) % 1;
+              pc.setAttribute('cx', bez(src.x, mx, mx, x - 4, u));
+              pc.setAttribute('cy', bez(src.y, src.y, ey, ey, u));
+              pc.style.opacity = L.reduced || L.paused ? 0 : clamp(Math.min(o, src.o), 0, 1) * Math.sin(u * Math.PI) * (tp.path ? .9 : .35);
+            }
           } else if (p) p.style.opacity = 0;
         });
       });
@@ -515,7 +523,10 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], core: el}; }} className="thread-core"/>
         {[0, 1, 2].map(k => <circle key={k} r={k === 2 ? 4.5 : 5.5} fill={`url(#${k === 2 ? 'pulse-in' : 'pulse-out'})`} ref={el => { (pulseRefs.current[m.id] ||= [])[k] = el; }}/>)}
       </g>)}
-      {(t0.acols ? ancLevels || [] : []).map((lvl, k) => lvl.map((n, i) => <path key={'at' + k + n.id} className="chain-thread dim" ref={el => { (aThreadRefs.current[k] ||= [])[i] = el; }}/>))}
+      {(t0.acols ? ancLevels || [] : []).map((lvl, k) => lvl.map((n, i) => <g key={'at' + k + n.id}>
+        <path className="chain-thread dim" ref={el => { (aThreadRefs.current[k] ||= [])[i] = el; }}/>
+        <circle r="4" fill="url(#pulse-out)" ref={el => { (aThreadPulseRefs.current[k] ||= [])[i] = el; }}/>
+      </g>))}
       {items.map((n, i) => <g key={n.id} style={{color: KINDS[n.kind].color}}>
         <path className="fan-thread" ref={el => { fanRefs.current[i] = el; }}/>
         {[0, 1].map(k => <circle key={k} r={k ? 3.5 : 4.5} fill={`url(#${k ? 'pulse-in' : 'pulse-out'})`} ref={el => { (fanPulseRefs.current[i] ||= [])[k] = el; }}/>)}
@@ -870,9 +881,10 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
       <div className="legend-lines"><span><i className="ln mutual"/>双向 <em>Mutual</em></span><span><i className="ln one"/>单向 <em>One-way</em></span></div>
     </div>}
     {stage === 'hub' && <Dock graph={graph} onGo={go}/>}
-    {/* 流水：hub=水母环下方起；模块/笔记=选中水母正下方一点起，一直垂到屏幕左下；层级在光球之下（文字不压光球） */}
+    {/* 流水：hub=左上文案下方起（红框位置），一路垂到屏幕底填满左侧；模块/笔记=选中水母正下方一点起。
+        层级在光球场景之下（文字不压光球），底部渐隐虚无。 */}
     <EcoStream events={ecoEvents} top={stage === 'hub'
-      ? Math.round(size.h * .53 + Math.min(size.h * .32, 262) + 48)
+      ? Math.round(Math.max(360, size.h * .3))
       : Math.round(size.h * .53 + 96)}/>
     {/* 宽屏 kb 钻取时层级轨迹已由画布上的横排胶囊承担，这里只在窄屏显示，避免两套面包屑重复 */}
     {zoneChain && stage === 'module' && size.w < 760 && <div className="zone-trail" aria-label="层级轨迹">

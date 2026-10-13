@@ -29,13 +29,15 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         if (o && !depth.has(o)) { depth.set(o, depth.get(id) + 1); q.push(o); }
       }
     }
-    // 节点过多时随机采样保上限（结构节点 folder/tag 全留，内容节点按稳定种子采样）——
-    // 星云保持密度感又不至于节点数千时糊成一片
+    // 节点过多时随机采样保上限：结构节点(folder/tag)与活模块内容(未结任务/拍板/记忆/服务)全留，
+    // 只稀疏画布大头——kb 笔记与已完成任务（背景星云要密度感，各水母旁的"细项小光点"一颗不能少）
     const allNodes = graph.nodes.filter(n => n.kind !== 'core');
     const CAP = 400;
     const rnd = id => { let s = 0; for (const c of id) s = (s * 131 + c.charCodeAt(0)) >>> 0; return (s % 9973) / 9973; };
+    const mustKeep = n => n.kind === 'folder' || n.kind === 'tag' || n.kind === 'decision' || n.kind === 'memory' || n.kind === 'service' || (n.kind === 'task' && n.task?.status !== 'done');
+    const must = allNodes.filter(mustKeep), rest = allNodes.filter(n => !mustKeep(n));
     const nodes = (allNodes.length > CAP
-      ? allNodes.filter(n => n.kind === 'folder' || n.kind === 'tag' || rnd(n.id) < (CAP - allNodes.filter(x => x.kind === 'folder' || x.kind === 'tag').length) / allNodes.length)
+      ? [...must, ...rest.filter(n => rnd(n.id) < (CAP - must.length) / Math.max(rest.length, 1))]
       : allNodes)
       .map((n, i) => ({
       n, p: layout[n.id], d: depth.get(n.id) ?? 4, seed: (i * 9301 + 49297) % 233280 / 233280,
@@ -154,9 +156,12 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         if (x.n.kind === 'ghost') { ctx.setLineDash([2, 2]); ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(px, py, r + 1, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
         else ctx.drawImage(orbSprite(color, P.light), px - r, py - r, r * 2, r * 2);
         if (L.stage === 'hub' && p > .9 && (x.n.kind === 'folder' || (hlLabel && hlLabel.has(x.n.id) && on))) {
-          ctx.globalAlpha = a * (x.n.kind === 'folder' ? .85 : .8);
-          ctx.fillStyle = P.label; ctx.font = `${x.n.kind === 'folder' ? 11.5 : 10.5}px -apple-system, "PingFang SC", sans-serif`;
+          // 分区锚点名：主展示文字之一，稍大稍亮+微光晕，保证在星云里读得清
+          ctx.globalAlpha = a * (x.n.kind === 'folder' ? .95 : .8);
+          ctx.fillStyle = P.label; ctx.font = `${x.n.kind === 'folder' ? 12.5 : 10.5}px -apple-system, "PingFang SC", sans-serif`;
+          ctx.shadowColor = 'rgba(0, 0, 0, .8)'; ctx.shadowBlur = 5;
           ctx.fillText((x.n.short || x.n.title).slice(0, 14), px + r + 5, py + 3.5);
+          ctx.shadowBlur = 0;
         }
         ctx.globalAlpha = 1;
       }
