@@ -163,11 +163,11 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
           const inHl = hl && hl.has(x.n.id);
           const la = isFolder ? .95
             : hl ? (inHl ? .92 : .05)
-            : .36;
+            : .52;
           if (!isDoneTask && la > .06) {
             ctx.globalAlpha = a * la;
             ctx.fillStyle = P.label;
-            ctx.font = `${isFolder ? 12.5 : 9.5}px -apple-system, "PingFang SC", sans-serif`;
+            ctx.font = `${isFolder ? 12.5 : 10}px -apple-system, "PingFang SC", sans-serif`;
             if (isFolder) { ctx.shadowColor = 'rgba(0, 0, 0, .8)'; ctx.shadowBlur = 5; }
             ctx.fillText((x.n.short || x.n.title).slice(0, isFolder ? 14 : 10), px + r + 4, py + 3);
             ctx.shadowBlur = 0;

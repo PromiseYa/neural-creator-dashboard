@@ -245,9 +245,9 @@ export function targets(L, t) {
     // 长清单不压缩间距：固定间距往下排，超出视口的部分用滚轮平移（panY），像一张往下无限延伸的画布。
     const panelLeft = W - clamp(W * .30, 360, 440) - 44;
     const n = L.items.length;
-    // 清单间距自适应：卡少（分类层 2-3 张）时舒张开（≤120px），长清单回到 54px 密排——
-    // 固定 54px 时两张分类卡叠在一起，触须开角小显得别扭（知识库多卡伞状才不显）
-    const fgap = clamp((H - 380) / Math.max(n, 1), 54, 120);
+    // 清单垂直间距全层统一 80px（分类层/清单层/深层一致，长清单靠滚轮平移）——
+    // 自适应间距会让 2 张卡 120px、10 张 62px，层与层之间跳变=视觉混乱
+    const fgap = 80;
     // 扇形第一列贴水母标签右缘约 190px（与其他列 200px 间距一致）：
     // 旧公式用 panelLeft 反推，宽屏会把清单推得离水母很远（视觉脱节）；详情面板让位交给笔记模式的整组缩放
     const originX = colX + 16 + 176 + 12;
@@ -277,7 +277,7 @@ export function targets(L, t) {
         const pi = Math.max(0, cards.findIndex(c => c.path === pz));
         const pos = new Array(cards.length);
         const nSib = cards.length - 1;
-        const sg = nSib ? clamp((H - 320) / nSib, 30, 110) : 54;   // 兄弟卡间距同理：少则舒展（≤110），多则密排
+        const sg = 80;   // 祖先列兄弟卡与当前列同款统一间距
         const sd = Math.min(1, sg / 46);   // 兄弟卡尽量保持原尺寸（文字不缩），只有深列排不下才等比缩
         let ay = cy - (sg - 8), by = cy + (sg - 8), j = 0;
         for (let i = 0; i < cards.length; i++) {
