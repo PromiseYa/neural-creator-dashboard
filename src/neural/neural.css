@@ -103,11 +103,11 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .jelly:hover, .jelly.active { filter: brightness(1.35) drop-shadow(0 0 12px rgba(255, 255, 255, .25)); }
 .jelly:focus-visible { outline: none; filter: brightness(1.5); }
 /* 标签始终压在所有水母的点击区之上，避免游动时被别的水母挡住 */
-.jelly-label { position: absolute; z-index: 2; left: 0; top: 0; display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon count" "name name" "sub sub"; align-items: center; column-gap: 8px; min-width: 132px; padding: 9px 12px 10px; border-radius: 12px; border: 1px solid var(--line); background: linear-gradient(160deg, rgba(50, 51, 50, .62), rgba(15, 16, 16, .76)); backdrop-filter: blur(10px); color: var(--text); text-align: left; will-change: transform, opacity; transition: border-color .3s, box-shadow .3s, background .3s; }
+.jelly-label { position: absolute; z-index: 2; left: 0; top: 0; display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon count" "name name" "sub sub"; align-items: center; column-gap: 8px; min-width: 132px; padding: 9px 6px 10px; border-radius: 12px; border: 0; background: none; backdrop-filter: none; color: var(--text); text-align: left; will-change: transform, opacity; text-shadow: 0 1px 8px rgba(0, 0, 0, .85), 0 0 22px rgba(0, 0, 0, .55); transition: filter .3s; filter: drop-shadow(0 0 10px rgba(0, 0, 0, .3)); }
 .jelly-label.below { justify-items: start; }
-.jelly-label:hover { border-color: color-mix(in srgb, var(--mod) 55%, transparent); }
-.jelly-label.active { border-color: rgba(230, 207, 152, .7); background: linear-gradient(120deg, color-mix(in srgb, var(--mod) 20%, transparent), rgba(16, 17, 17, .82)); box-shadow: 0 0 0 1px rgba(230, 207, 152, .22), 0 0 26px color-mix(in srgb, var(--mod) 26%, transparent); }
-.jl-icon { grid-area: icon; width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; color: var(--mod); background: color-mix(in srgb, var(--mod) 14%, transparent); }
+.jelly-label:hover { filter: drop-shadow(0 0 12px color-mix(in srgb, var(--mod) 38%, transparent)); }
+.jelly-label.active { text-shadow: 0 1px 8px rgba(0, 0, 0, .9), 0 0 26px color-mix(in srgb, var(--mod) 55%, transparent); filter: drop-shadow(0 0 14px color-mix(in srgb, var(--mod) 30%, transparent)); }
+.jl-icon { grid-area: icon; width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; color: var(--mod); background: none; filter: drop-shadow(0 0 6px color-mix(in srgb, var(--mod) 45%, transparent)); }
 .jl-count { grid-area: count; font-size: 22px; font-weight: 600; line-height: 1; }
 .jl-name { grid-area: name; margin-top: 6px; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
 .jl-sub { grid-area: sub; font-size: 10.5px; color: var(--text-2); white-space: nowrap; }

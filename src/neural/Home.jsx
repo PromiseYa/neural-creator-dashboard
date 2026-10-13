@@ -79,6 +79,24 @@ export function moduleItems(graph, modId, zone) {
     return [...dirCards.sort((a, b) => b.count - a.count),
       ...roots.sort((a, b) => String(b.updated || '').localeCompare(String(a.updated || '')))];
   }
+  // 任务流两级钻取（与知识库/服务舱同款语法）：第一层=待办/今日完成/累计完成三张分类卡，
+  // 第二层=对应任务清单（done 任务带"完成"徽章，可点开详情，状态扇形可切回待办）
+  if (m.kind === 'task' && zone !== undefined) {
+    const all = graph.nodes.filter(n => n.kind === 'task');
+    const today = new Date().toISOString().slice(0, 10);
+    const doneList = all.filter(n => n.task?.status === 'done');
+    const byDone = (a, b) => String(b.task?.done_at || '').localeCompare(String(a.task?.done_at || ''));
+    if (!zone) {
+      const open = all.filter(n => n.task?.status !== 'done');
+      const card = (id, title, list) => ({id, kind: 'folder', title, short: title, count: list.length, unit: '条', path: title, level: 2});
+      return [card('f:task:open', '待办', open), card('f:task:today', '今日完成', doneList.filter(n => String(n.task?.done_at || '').slice(0, 10) === today)), card('f:task:all', '累计完成', doneList)];
+    }
+    if (zone === '待办') return all.filter(n => n.task?.status !== 'done')
+      .sort((a, b) => String(b.task?.updated_at || '').localeCompare(String(a.task?.updated_at || '')));
+    if (zone === '今日完成') return doneList.filter(n => String(n.task?.done_at || '').slice(0, 10) === today).sort(byDone);
+    if (zone === '累计完成') return doneList.sort(byDone);
+    return [];
+  }
   // 服务舱两级钻取（与知识库分区同款语法）：第一层=核心服务/常驻工作者两张分类卡，
   // 第二层=该分类下的服务卡。分类用中文标题当 zone（面包屑显示用），服务归属靠 service.group。
   if (m.kind === 'service' && zone !== undefined) {
@@ -100,10 +118,15 @@ export function moduleItems(graph, modId, zone) {
 }
 
 function moduleSummary(graph, m) {
-  // 服务舱进了分类层后 items 是分类卡：水母上的计数/在线数始终按服务本体统计
+  // 服务舱/任务流进了分类层后 items 是分类卡：水母上的计数始终按本体统计
   if (m.id === 'services') {
     const S = graph.nodes.filter(n => n.kind === 'service');
     return {count: S.length, sub: [S.filter(n => n.service?.ok).length, '在线', 'online']};
+  }
+  if (m.id === 'tasks') {
+    const T = graph.nodes.filter(n => n.kind === 'task');
+    const open = T.filter(n => n.task?.status !== 'done');
+    return {count: open.length, sub: [open.filter(n => n.task?.status === 'doing').length || open.length, '未结', 'open']};
   }
   const items = moduleItems(graph, m.id);
   const sub = {
@@ -121,7 +144,7 @@ const HB_ZH = {ok: '心跳正常', noreport: '无心跳', late: '心跳迟到'};
 function itemMeta(n) {
   const d = split(n);
   switch (n.kind) {
-    case 'folder': return [[n.online != null ? '服务' : '篇数', n.online != null ? 'Services' : 'Notes', n.count || 0], n.online != null ? ['在线', 'Online', n.online] : ['', '', ''], ['', '', '']];
+    case 'folder': return [[n.unit || (n.online != null ? '服务' : '篇数'), n.online != null ? 'Services' : 'Notes', n.count || 0], n.online != null ? ['在线', 'Online', n.online] : ['', '', ''], ['', '', '']];
     case 'task': return [[STATUS_ZH[n.task?.status] || n.task?.status || '—', '', ''], [PRIO_ZH[n.task?.priority] || n.task?.priority || '—', '', ''], ['↔', '', d.both]];
     case 'note': return [['出链', 'Out', d.out], ['反链', 'In', d.back], ['↔', '', d.both]];
     case 'decision': return [[n.decision?.status || '—', '', ''], [String(n.decision?.created_at || '').slice(5, 10) || '—', '', ''], ['↔', '', d.both]];
@@ -173,7 +196,9 @@ export function targets(L, t) {
     // 长清单不压缩间距：固定间距往下排，超出视口的部分用滚轮平移（panY），像一张往下无限延伸的画布。
     const panelLeft = W - clamp(W * .30, 360, 440) - 44;
     const n = L.items.length;
-    const fgap = 54;
+    // 清单间距自适应：卡少（分类层 2-3 张）时舒张开（≤120px），长清单回到 54px 密排——
+    // 固定 54px 时两张分类卡叠在一起，触须开角小显得别扭（知识库多卡伞状才不显）
+    const fgap = clamp((H - 380) / Math.max(n, 1), 54, 120);
     // 扇形第一列贴水母标签右缘约 190px（与其他列 200px 间距一致）：
     // 旧公式用 panelLeft 反推，宽屏会把清单推得离水母很远（视觉脱节）；详情面板让位交给笔记模式的整组缩放
     const originX = colX + 16 + 176 + 12;
@@ -201,9 +226,9 @@ export function targets(L, t) {
         const pi = Math.max(0, cards.findIndex(c => c.path === pz));
         const pos = new Array(cards.length);
         const nSib = cards.length - 1;
-        const sg = nSib ? Math.min(54, Math.max(30, (H - 280) / nSib)) : 54;
+        const sg = nSib ? clamp((H - 320) / nSib, 30, 110) : 54;   // 兄弟卡间距同理：少则舒展（≤110），多则密排
         const sd = Math.min(1, sg / 46);   // 兄弟卡尽量保持原尺寸（文字不缩），只有深列排不下才等比缩
-        let ay = cy - 47, by = cy + 47, j = 0;
+        let ay = cy - (sg - 8), by = cy + (sg - 8), j = 0;
         for (let i = 0; i < cards.length; i++) {
           if (i === pi) { pos[pi] = {x: SX[k], y: cy, s: 1, path: true}; continue; }
           pos[i] = j % 2 === 0 ? {x: SX[k], y: ay, s: sd, dim: true} : {x: SX[k], y: by, s: sd, dim: true};
@@ -613,11 +638,24 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   const [panned, setPanned] = useState(false);   // 用户滚过一次后隐藏平移提示（提示用完即走）
   const {mod, zone, sel} = focus;
   const stage = sel ? 'note' : mod ? 'module' : 'hub';
-  const items = useMemo(() => moduleItems(graph, mod, mod === 'kb' || mod === 'services' ? (zone || '') : undefined), [graph, mod, zone]);
+  const items = useMemo(() => moduleItems(graph, mod, mod === 'kb' || mod === 'services' || mod === 'tasks' ? (zone || '') : undefined), [graph, mod, zone]);
   // 层级卡链：按 zone 的真实目录层级逐级展开（任意深度），每张卡篇数 = 该层子树全部笔记数；
   // 旧层缩小靠上保留（完整层名+篇数），点击直接回退到该层
   const zoneChain = useMemo(() => {
-    if ((mod !== 'kb' && mod !== 'services') || !zone) return null;
+    if ((mod !== 'kb' && mod !== 'services' && mod !== 'tasks') || !zone) return null;
+    if (mod === 'tasks') {
+      // 任务流两级链：任务流 → 分类（待办/今日完成/累计完成），计数=各自清单
+      const T = graph.nodes.filter(x => x.kind === 'task');
+      const today = new Date().toISOString().slice(0, 10);
+      const done = T.filter(x => x.task?.status === 'done');
+      const n = zone === '待办' ? T.length - done.length
+        : zone === '今日完成' ? done.filter(x => String(x.task?.done_at || '').slice(0, 10) === today).length
+        : done.length;
+      return [
+        {name: '任务流', zone: null, n: T.length - done.length},
+        {name: zone, zone, n}
+      ];
+    }
     if (mod === 'services') {
       // 服务舱两级链：服务舱 → 分类（核心服务/常驻工作者），计数=服务本体（含离线）
       const S = graph.nodes.filter(x => x.kind === 'service');
@@ -647,7 +685,7 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   // 祖先列清单：钻取路径上每一层的内容（k=0=分区卡列，…），与当前列一起层层递进；
   // 每列的"钻入卡"= 下一层的 zone（高亮 + 喂养下一列触须）
   const ancLevels = useMemo(() => {
-    if ((mod !== 'kb' && mod !== 'services') || !zoneChain) return [];
+    if ((mod !== 'kb' && mod !== 'services' && mod !== 'tasks') || !zoneChain) return [];
     const out = [];
     for (let k = 0; k < zoneChain.length - 1; k++) out.push(moduleItems(graph, mod, zoneChain[k].zone));
     return out;
@@ -766,9 +804,11 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     const n = graph.index.get(id), m = moduleOf(n);
     if (!m) return;
     // 落到笔记真实所在的目录层（分区 + 完整子路径），层卡链与面包屑随之完整展开
+    // 落到内容真实所在层：笔记=KB 目录层；已完成任务=累计完成层（跳转/搜索点过来不迷路）
     const z = n.kind === 'note' && String(n.folder || '').startsWith('f:kb:')
-      ? [n.folder.slice(5), n.subzone].filter(Boolean).join('/') || null : null;
-    setFocus({mod: m.id, zone: m.id === 'kb' ? z : null, sel: id});
+      ? [n.folder.slice(5), n.subzone].filter(Boolean).join('/') || null
+      : n.kind === 'task' && n.task?.status === 'done' ? '累计完成' : null;
+    setFocus({mod: m.id, zone: m.id === 'kb' || m.id === 'tasks' ? z : null, sel: id});
   }, [graph, setFocus]);
   const replay = () => {
     const L = live.current, now = performance.now();
@@ -788,7 +828,7 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     <Scene graph={graph} items={stage === 'hub' ? [] : items} sel={sel} live={live} zonePath={zonePath} ancLevels={ancLevels} zone={zone}
       onAction={onAction} onHome={() => setFocus({mod: null, sel: null})}
       onModule={id => setFocus({mod: id === mod && stage !== 'hub' ? mod : id, zone: null, sel: null})} onItem={n => {
-      if (n.kind === 'folder' && (mod === 'kb' || mod === 'services')) {   // 分区/子目录/服务分类卡：按卡上的完整路径往里钻一层
+      if (n.kind === 'folder' && (mod === 'kb' || mod === 'services' || mod === 'tasks')) {   // 分区/子目录/服务与任务分类卡：按卡上的完整路径往里钻一层
         setFocus({mod, zone: n.path, sel: null});
       } else if (n.kind !== 'ghost') {
         setFocus({mod, zone, sel: n.id});
@@ -848,7 +888,7 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     </div>}
     {stage === 'module' && !panned && (targets(live.current, 0).fan?.panMax || 0) > 0 && <div className="pan-hint" aria-hidden="true">▼ 滚轮往下平移清单 <em>{items.length} 条</em></div>}
 
-    {stage === 'module' && <p className="module-hint">{mod === 'kb' && !zone ? '选择一个分区进入' : mod === 'services' && !zone ? '选择一个分类进入服务舱' : mod === 'kb' ? '点目录进入下一层 · 点笔记查看全部分析' : '选择一篇笔记查看全部分析'} · <em>Select to explore</em></p>}
+    {stage === 'module' && <p className="module-hint">{mod === 'kb' && !zone ? '选择一个分区进入' : mod === 'services' && !zone ? '选择一个分类进入服务舱' : mod === 'tasks' && !zone ? '选择一个分类进入任务流' : mod === 'kb' ? '点目录进入下一层 · 点笔记查看全部分析' : '选择一篇笔记查看全部分析'} · <em>Select to explore</em></p>}
 
     {node && <aside className="analysis-wrap" key={sel}>
       <Analysis graph={graph} node={node} module={m} onGo={go} onAction={onAction} onClose={() => setFocus({mod, zone, sel: null})}/>

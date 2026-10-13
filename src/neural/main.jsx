@@ -121,9 +121,11 @@ function App() {
   const openInGraph = id => {
     const n = graph.index.get(id);
     const mod = {task: 'tasks', note: 'kb', decision: 'decisions', memory: 'memory', service: 'services'}[n?.kind];
-    // 落到笔记真实所在目录层（分区 + 完整子路径）
-    if (mod) setFocus({mod, zone: mod === 'kb' && String(n.folder || '').startsWith('f:kb:')
-      ? [n.folder.slice(5), n.subzone].filter(Boolean).join('/') || null : null, sel: id});
+    // 落到内容真实所在的目录层（笔记=分区+子路径；已完成任务=累计完成层）
+    const z = mod === 'kb' && String(n.folder || '').startsWith('f:kb:')
+      ? [n.folder.slice(5), n.subzone].filter(Boolean).join('/') || null
+      : mod === 'tasks' && n.task?.status === 'done' ? '累计完成' : null;
+    if (mod) setFocus({mod, zone: z, sel: id});
   };
   const onAction = useCallback(a => {
     if (a.type === 'read') setReadNode(graph.index.get(a.id));

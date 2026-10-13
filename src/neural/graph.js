@@ -3,7 +3,7 @@
 import {CONFIG} from '../config';
 import {T} from './theme';
 
-export const STATUS_ZH = {pending: '待办', dispatched: '已派', doing: '进行中', waiting_confirm: '待确认', review: '待复核'};
+export const STATUS_ZH = {pending: '待办', dispatched: '已派', doing: '进行中', waiting_confirm: '待确认', review: '待复核', done: '完成'};
 export const PRIO_ZH = {high: '高', mid: '中', low: '低'};
 // 六状态徽章分色（与 8331 驾驶舱同口径）
 export const ST_COLOR = {pending: '#98a6a1', dispatched: '#a9d3e4', doing: '#7ddc9a', waiting_confirm: '#e8c48c', review: '#c0b8ef', done: '#8fa396'};
@@ -237,7 +237,9 @@ function rng(seed) { let s = 0; for (const c of seed) s = (s * 31 + c.charCodeAt
 const rad = d => d * Math.PI / 180;
 
 export function forceLayout(graph) {
-  const N = graph.nodes, idx = graph.index;
+  const all = graph.nodes, idx = graph.index;
+  // 已完成任务不参与力导向迭代（累计几百条会把 O(N²) 迭代拖到秒级），直接按锚点随机摆放
+  const N = all.filter(n => !(n.kind === 'task' && n.task?.status === 'done'));
   const anchor = id => {
     const n = idx.get(id);
     if (n.kind === 'concept') return [0, -1];
@@ -247,7 +249,7 @@ export function forceLayout(graph) {
     const f = FOLDERS.find(x => x.id === fid) || FOLDERS.find(x => x.id === id);
     return f ? [Math.cos(rad(f.angle)), Math.sin(rad(f.angle))] : null;
   };
-  for (const n of N) {
+  for (const n of all) {   // 初始化含 done 任务（弹簧段读它们的坐标，不初始化会 NaN 传染）
     const r = rng(n.id), a = anchor(n.id);
     const R = n.kind === 'core' ? 0 : n.kind === 'folder' ? (n.level ? 300 : 210) : CONTENT.has(n.kind) ? 330 : 420;
     const base = a ? Math.atan2(a[1], a[0]) : r() * Math.PI * 2;
@@ -282,7 +284,7 @@ export function forceLayout(graph) {
       n.x += n.vx; n.y += n.vy; n.vx *= .55; n.vy *= .55;
     }
   }
-  return Object.fromEntries(N.map(n => [n.id, [n.x, n.y * .82]]));
+  return Object.fromEntries(all.map(n => [n.id, [n.x, n.y * .82]]));
 }
 
 // 放射层级：以创作空间为圆心，按链接层数排成同心环。
@@ -316,7 +318,7 @@ export function askGraph(graph, question, scope) {
   const name = id => graph.index.get(id)?.short || graph.index.get(id)?.title;
   const cards = [];
   if (/任务|未结|在办|待办/.test(q)) {
-    const T = graph.nodes.filter(n => n.kind === 'task');
+    const T = graph.nodes.filter(n => n.kind === 'task' && n.task?.status !== 'done');
     const bySt = {};
     for (const t of T) bySt[t.task.status] = (bySt[t.task.status] || 0) + 1;
     cards.push({tone: 'info', title: `未结任务 ${T.length} 条`, en: 'Open tasks', text: Object.entries(bySt).map(([k, v]) => `${STATUS_ZH[k] || k} ${v}`).join(' · ') || '当前没有未结任务。', items: T.map(n => n.id)});

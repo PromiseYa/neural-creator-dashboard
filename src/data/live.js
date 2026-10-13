@@ -23,17 +23,19 @@ export const STATUS_ZH = {pending: '待办', dispatched: '已派', doing: '进�
 export const wvFocus = () => { try { window.chrome?.webview?.postMessage('star-input-focus'); } catch {} };
 export const wvBlur = () => { try { window.chrome?.webview?.postMessage('star-input-blur'); } catch {} };
 
-// 一次全量拉取：工作站实体 + KB 现场 + memorycore 状态 + 核心服务探测。
+// 一次全量拉取：工作站实体 + KB 现场 + memorycore 状态 + 核心服务探测 + 累计完成任务（vite 只读直查 hub.db）。
 export async function fetchEcosystem() {
-  const [ent, kb, mem] = await Promise.allSettled([
+  const [ent, kb, mem, done] = await Promise.allSettled([
     getJSON('/hub/api/entities'),
     getJSON('/api/kb-graph', 8000),
-    getJSON('/api/memory-state', 2500)
+    getJSON('/api/memory-state', 2500),
+    getJSON('/api/hub-done', 5000)
   ]);
   const entities = ent.status === 'fulfilled' && ent.value?.ok ? ent.value : null;
   const data = entities?.data || {};
   const notes = kb.status === 'fulfilled' ? (kb.value?.notes || []) : [];
   const memState = mem.status === 'fulfilled' && mem.value?.ok ? mem.value : null;
+  const doneRows = done.status === 'fulfilled' && done.value?.ok ? (done.value.rows || []) : [];
 
   // 服务舱：四个核心端点探测 + 常驻工作者（来自实体心跳，cron 型不进，避免一片红）
   const [hubOK, panelOK, kbOK] = await Promise.all([
@@ -50,7 +52,7 @@ export async function fetchEcosystem() {
   ];
 
   return {
-    tasks: data.tasks?.open || [],
+    tasks: [...(data.tasks?.open || []), ...doneRows],   // 未结 + 累计完成（done 行带 status='done'/done_at，任务流分类钻取用）
     decisions: data.decisions || [],
     memories: memState?.items || [],        // memorycore 池条目（降级候选摘要）
     memState,                               // 池状态摘要（updated/pool_n/defer_n/sync）

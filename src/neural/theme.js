@@ -12,7 +12,8 @@ export const T = {
     memory: {color: '#9cc8ee', filter: 'hue-rotate(165deg) saturate(2.3) brightness(.92)'},
     services: {color: '#e4e7ea', filter: 'hue-rotate(185deg) saturate(1.15) brightness(1.12)'}
   },
-  media: {orb: asset('media/orb.mp4'), orbPoster: asset('media/orb.jpg'), jelly: asset('media/jellyfish.mp4'), jellyPoster: asset('media/jellyfish.jpg')},
+  // palindrome 剪辑（正放+倒放拼接）：循环回到首帧时画面连续，消除播完一帧的跳变；原片保留作回退
+  media: {orb: asset('media/orb_pal.mp4'), orbPoster: asset('media/orb.jpg'), jelly: asset('media/jellyfish_pal.mp4'), jellyPoster: asset('media/jellyfish.jpg')},
   pulse: {out: ['#fffaf0', '#ecd39e'], in: ['#ffffff', '#e3b3c4']},
   ring: ['#ecd9a6', '#c9cac5'],
   logo: ['#7d7f7c', '#d8d9d6', '#ecd9a6', '#a9aba7'],

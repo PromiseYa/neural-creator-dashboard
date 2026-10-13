@@ -196,6 +196,17 @@ function detailPlugin() {
           res.end(fs.readFileSync(full));
         } catch { json(res, 404, {ok: false}); }
       });
+      server.middlewares.use('/api/hub-done', async (req, res) => {
+        // 累计完成任务清单（任务流分类钻取的数据源；只读直查，不进 8331 投影）
+        try {
+          const {DatabaseSync} = await import('node:sqlite');
+          const db = new DatabaseSync(HUB_DB, {readOnly: true});
+          try {
+            const rows = db.prepare("SELECT id,title,done_at,'done' AS status FROM tasks WHERE status='done' ORDER BY done_at DESC").all();
+            json(res, 200, {ok: true, rows});
+          } finally { db.close(); }
+        } catch { json(res, 500, {ok: false}); }
+      });
       server.middlewares.use('/api/hub-detail', async (req, res) => {
         const id = q(req).get('t') || q(req).get('d') || '';
         if (!/^[TD]-[\w-]+$/.test(id)) return json(res, 400, {ok: false});   // 拍板号可带字母后缀（D-989A/D-TEST1），纯数字校验会误杀
