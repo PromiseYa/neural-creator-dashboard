@@ -1,5 +1,5 @@
 import React, {useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback} from 'react';
-import {MODULES, KINDS, stats, askGraph, moduleOf, STATUS_ZH} from './graph';
+import {MODULES, KINDS, stats, askGraph, moduleOf, STATUS_ZH, PRIO_ZH, nodeBadge} from './graph';
 import {Icon} from './icons';
 import {NetworkCanvas} from './NetworkCanvas';
 import {Analysis} from './Analysis';
@@ -12,6 +12,39 @@ export const MOD_STYLE = Object.fromEntries(Object.entries(T.modules).map(([id, 
 
 export const split = n => ({out: n.out - n.mutual, back: n.in - n.mutual, both: n.mutual});
 const fmt = v => v == null ? '—' : Number(v).toLocaleString('zh-CN');
+
+// 生态流水（hub 视图左下）：工作站最近事件按时间排布，30 秒轮询自动更新；
+// 比上一轮更大的事件号视为"新到"，金色高亮几秒后回归。与任务/拍板/服务色系一致的小圆点着色。
+const ACT_COLOR = {dispatch: '#a9d3e4', task: '#c3bcf2', decide: '#e8c48c', decision: '#e8c48c', alarm: '#ff7385', cmd: '#7ddc9a', event: '#98a6a1'};
+function EcoStream({events}) {
+  const [freshIds, setFreshIds] = useState(() => new Set());
+  const seenMax = useRef(null);
+  useEffect(() => {
+    if (!events.length) return;
+    const maxId = Math.max(...events.map(e => e.id || 0));
+    if (seenMax.current == null) { seenMax.current = maxId; return; }   // 首轮只记录水位，不标新
+    const news = events.filter(e => (e.id || 0) > seenMax.current);
+    seenMax.current = maxId;
+    if (news.length) {
+      setFreshIds(new Set(news.map(e => e.id)));
+      const t = setTimeout(() => setFreshIds(new Set()), 6000);
+      return () => clearTimeout(t);
+    }
+  }, [events]);
+  if (!events.length) return null;
+  return <div className="ecostream glass" aria-label="生态流水">
+    <h3><Icon name="pulse" size={13}/>生态流水 <em>Stream</em><b>{events.length} 条</b></h3>
+    <div className="eco-list">
+      {events.slice(0, 14).map(e => (
+        <div key={e.id ?? (e.ts + (e.detail || ''))} className={`eco-item${freshIds.has(e.id) ? ' fresh' : ''}`}>
+          <i style={{'--ec': ACT_COLOR[e.kind] || ACT_COLOR.event}}/>
+          <span className="eco-ts">{String(e.ts || '').slice(5, 16)}</span>
+          <span className="eco-txt" title={e.detail || ''}>{e.detail || `${e.actor || ''} ${e.action || ''}`}</span>
+        </div>
+      ))}
+    </div>
+  </div>;
+}
 
 // 知识库按真实目录层级钻取（文件浏览器语义）：zone=null 显示分区层；
 // zone='工作区' 或更深 '工作区/子目录/xx' 时，每层都显示 [子目录卡 + 直接放在本层的笔记] 混排，
@@ -45,6 +78,19 @@ export function moduleItems(graph, modId, zone) {
     return [...dirCards.sort((a, b) => b.count - a.count),
       ...roots.sort((a, b) => String(b.updated || '').localeCompare(String(a.updated || '')))];
   }
+  // 服务舱两级钻取（与知识库分区同款语法）：第一层=核心服务/常驻工作者两张分类卡，
+  // 第二层=该分类下的服务卡。分类用中文标题当 zone（面包屑显示用），服务归属靠 service.group。
+  if (m.kind === 'service' && zone !== undefined) {
+    const all = graph.nodes.filter(n => n.kind === 'service');
+    if (!zone) {
+      const grp = g => all.filter(n => n.service?.group === g);
+      const card = (id, title, list) => ({id, kind: 'folder', title, short: title, count: list.length,
+        online: list.filter(n => n.service?.ok).length, path: title, level: 2});
+      return [card('f:svc:core', '核心服务', grp('core')), card('f:svc:worker', '常驻工作者', grp('worker'))];
+    }
+    const g = zone === '核心服务' ? 'core' : zone === '常驻工作者' ? 'worker' : null;
+    return all.filter(n => n.service?.group === g);
+  }
   const list = graph.nodes.filter(n => n.kind === m.kind);
   if (m.kind === 'post') list.sort((a, b) => String(a.date).localeCompare(String(b.date)));
   if (m.kind === 'task') list.sort((a, b) => String(b.task?.updated_at || '').localeCompare(String(a.task?.updated_at || '')));
@@ -53,6 +99,11 @@ export function moduleItems(graph, modId, zone) {
 }
 
 function moduleSummary(graph, m) {
+  // 服务舱进了分类层后 items 是分类卡：水母上的计数/在线数始终按服务本体统计
+  if (m.id === 'services') {
+    const S = graph.nodes.filter(n => n.kind === 'service');
+    return {count: S.length, sub: [S.filter(n => n.service?.ok).length, '在线', 'online']};
+  }
   const items = moduleItems(graph, m.id);
   const sub = {
     tasks: () => [items.filter(n => n.task?.status === 'doing').length || items.length, '未结', 'open'],
@@ -64,15 +115,17 @@ function moduleSummary(graph, m) {
   return {count: items.length, sub};
 }
 
+const HB_ZH = {ok: '心跳正常', noreport: '无心跳', late: '心跳迟到'};
+
 function itemMeta(n) {
   const d = split(n);
   switch (n.kind) {
-    case 'folder': return [['篇数', 'Notes', n.count || 0], ['', '', ''], ['', '', '']];
-    case 'task': return [[STATUS_ZH[n.task?.status] || n.task?.status || '—', '', ''], [n.task?.priority || '—', '', ''], ['↔', '', d.both]];
+    case 'folder': return [[n.online != null ? '服务' : '篇数', n.online != null ? 'Services' : 'Notes', n.count || 0], n.online != null ? ['在线', 'Online', n.online] : ['', '', ''], ['', '', '']];
+    case 'task': return [[STATUS_ZH[n.task?.status] || n.task?.status || '—', '', ''], [PRIO_ZH[n.task?.priority] || n.task?.priority || '—', '', ''], ['↔', '', d.both]];
     case 'note': return [['出链', 'Out', d.out], ['反链', 'In', d.back], ['↔', '', d.both]];
     case 'decision': return [[n.decision?.status || '—', '', ''], [String(n.decision?.created_at || '').slice(5, 10) || '—', '', ''], ['↔', '', d.both]];
-    case 'memory': return [['记忆', '', ''], ['↔', '', d.both], ['', '', '']];
-    case 'service': return [[n.service?.ok ? '在线' : '离线', '', ''], [n.service?.state || '', '', ''], ['', '', '']];
+    case 'memory': return [[n.updated ? `更新 ${String(n.updated).slice(5)}` : '记忆池', '', ''], ['↔', '', d.both], ['', '', '']];
+    case 'service': return [[n.service?.ok ? '在线' : (n.service?.state === 'noreport' ? '无心跳' : '离线'), '', ''], [HB_ZH[n.service?.state] || '', '', ''], ['', '', '']];
     case 'post': return [['观看', 'Views', fmt(n.post.views)], ['收藏', 'Saves', fmt(n.post.saves)], ['↔', '', d.both]];
     case 'idea': return [[n.idea.priority, 'Priority', ''], [n.idea.status, '', ''], ['↔', '', d.both]];
     case 'draft': return [['字', 'Chars', fmt((n.body || '').length)], ['↔', '', d.both], ['', '', '']];
@@ -461,7 +514,7 @@ function Scene({graph, items, onModule, onItem, live, sel, zonePath, ancLevels, 
       // 祖先列卡片（水母列语法）：选中卡放大居中当主角，兄弟卡缩小排上下；点击任意卡切回该层
       const n = (ancLevels || [])[k]?.[i];
       if (!n || !tp) return null;
-      const meta = itemMeta(n);
+      const meta = itemMeta(n), bd = nodeBadge(n);
       return <button key={n.id} className={`fan-item mini${tp.path ? ' active' : ''}`} ref={el => { (aItemRefs.current[k] ||= [])[i] = el; }}
         onClick={() => onItem(n)} style={{'--kc': KINDS[n.kind].color, transform: `translate3d(${tp.x}px,${tp.y}px,0) scale(${tp.s})`, transformOrigin: 'top left', opacity: tp.dim ? .62 : .9}}
         aria-label={`${n.title}${n.count != null ? '，' + n.count + ' 篇' : ''}`}>
@@ -470,16 +523,18 @@ function Scene({graph, items, onModule, onItem, live, sel, zonePath, ancLevels, 
           <span className="fi-title">{n.short || n.title}</span>
           <span className="fi-meta">{meta.map(([kk, en, v], j) => <span key={j} className={kk === '↔' ? 'mutual' : ''}>{kk}{en && <em>{en}</em>} {v !== '' && <b>{v}</b>}</span>)}</span>
         </span>
+        {bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}
       </button>;
     }))}
     {items.map((n, i) => {
-      const meta = itemMeta(n), fp = t0.fan;
+      const meta = itemMeta(n), fp = t0.fan, bd = nodeBadge(n);
       return <button key={n.id} className={`fan-item ${sel === n.id ? 'active' : ''} kind-${n.kind}`} ref={el => { itemRefs.current[i] = el; }} onClick={() => onItem(n)} style={{'--kc': KINDS[n.kind].color, transform: `translate3d(${fp.x}px,${fp.y0 + i * fp.gap - 15}px,0) scale(${fp.scale || 1})`, transformOrigin: 'top left'}} aria-label={`打开 ${n.title} 的分析`}>
         <span className="fi-dot"/>
         <span className="fi-body">
           <span className="fi-title">{n.short || n.title}</span>
           <span className="fi-meta">{meta.map(([k, en, v], j) => <span key={j} className={k === '↔' ? 'mutual' : ''}>{k}{en && <em>{en}</em>} {v !== '' && <b>{v}</b>}</span>)}</span>
         </span>
+        {bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}
       </button>;
     })}
   </div>;
@@ -489,6 +544,7 @@ function Dock({graph, onGo}) {
   const s = useMemo(() => stats(graph), [graph]);
   const [q, setQ] = useState('');
   const [cards, setCards] = useState(null);
+  const [asking, setAsking] = useState(false);   // 输入框聚焦：壁纸模式输入法挂不上，提示改走窗口输入
   const typing = useRef(null);
   const ask = text => { if (text.trim()) setCards({q: text, list: askGraph(graph, text)}); };
   const typeAsk = text => {
@@ -512,25 +568,29 @@ function Dock({graph, onGo}) {
     <div className="dock-panel glass">
       <div className="dock-kpis">{kpis.map(([k, en, v]) => <div key={k}><span>{k} <em>{en}</em></span><strong>{v}</strong></div>)}</div>
       <form className="ask" onSubmit={e => { e.preventDefault(); ask(q); }}>
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="问问你的创作图谱… Ask your graph" aria-label="向图谱提问"/>
+        <input value={q} onChange={e => setQ(e.target.value)} onFocus={() => setAsking(true)} onBlur={() => setAsking(false)} placeholder="问问你的生态图谱… Ask your graph" aria-label="向图谱提问"/>
         <button className="send" aria-label="提交问题"><Icon name="send" size={16}/></button>
       </form>
+      {asking && <div className="ask-hint">
+        <span><Icon name="info" size={12}/>壁纸模式打不了中文（输入法进不去）——英文数字可用，或点选下方问题</span>
+        <button type="button" onClick={() => window.open('http://127.0.0.1:5173/', '_blank')}>在窗口中打开<Icon name="outlink" size={11}/></button>
+      </div>}
       <div className="dock-chips">
         <span className="me"><Icon name="agent" size={13}/>我的图谱 <em>My graph</em></span>
-        {['未结任务有哪些？', '待拍板', '服务健康', '最核心的内容'].map(x => <button key={x} onClick={() => typeAsk(x)}>{x}</button>)}
+        {['未结任务有哪些？', '待拍板', '服务健康', '最核心的内容', '记忆池', '未创建的笔记'].map(x => <button key={x} onClick={() => typeAsk(x)}>{x}</button>)}
       </div>
     </div>
   </div>;
 }
 
-export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced}) {
+export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced, ecoEvents = []}) {
   const stageRef = useRef(null);
   const [size, setSize] = useState({w: 1280, h: 760});
   const [paused, setPaused] = useState(false);
   const [panned, setPanned] = useState(false);   // 用户滚过一次后隐藏平移提示（提示用完即走）
   const {mod, zone, sel} = focus;
   const stage = sel ? 'note' : mod ? 'module' : 'hub';
-  const items = useMemo(() => moduleItems(graph, mod, mod === 'kb' ? (zone || '') : undefined), [graph, mod, zone]);
+  const items = useMemo(() => moduleItems(graph, mod, mod === 'kb' || mod === 'services' ? (zone || '') : undefined), [graph, mod, zone]);
   // 层级卡链：按 zone 的真实目录层级逐级展开（任意深度），每张卡篇数 = 该层子树全部笔记数；
   // 旧层缩小靠上保留（完整层名+篇数），点击直接回退到该层
   const zoneChain = useMemo(() => {
@@ -629,38 +689,12 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     const onTouchEnd = () => { touchPt = null; };
     el.addEventListener('touchmove', onTouchMove, {passive: false});
     el.addEventListener('touchend', onTouchEnd);
-    // 鼠标按住拖拽 = 平移长清单（触摸板一指按住拖 / 真鼠标拖；壁纸模式 Lively 转发移动+左键即可用）。
-    // 起点 6px 内不算拖（保住纯点击开卡片），激活后画布 1.5 倍跟手、信息栏内 1:1 滚面板本身；拖完 80ms 内吞 click 防误开
-    let drag = null, suppressUntil = 0;
-    const onMouseDown = e => {
-      if (e.button !== 0 || e.target?.closest?.('.veil, .ask-results')) return;
-      drag = {x: e.clientX, y: e.clientY, panel: e.target?.closest?.('.analysis-wrap'), moved: false};
-    };
-    const onMouseMove = e => {
-      const L = live.current;
-      L.cursor = {x: e.clientX, y: e.clientY};   // 记录光标位置：键盘上下键按光标悬停区域路由（信息栏=滚面板/画布=平移清单）
-      if (!drag) return;
-      if (!drag.moved) {
-        if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
-        drag.moved = true;
-        if (drag.panel) drag.scroller = drag.panel.querySelector('.an-scroll');
-      }
-      const dy = drag.y - e.clientY;
-      if (drag.panel) { if (drag.scroller) drag.scroller.scrollTop += dy; }
-      else if (L.stage !== 'hub') {
-        const panMax = targets(L, 0).fan?.panMax || 0;
-        if (panMax) { L.panY = clamp((L.panY || 0) + dy * 1.5, 0, panMax); setPanned(true); }
-      }
-      drag.x = e.clientX; drag.y = e.clientY;
-    };
-    const onMouseUp = () => { if (drag?.moved) suppressUntil = performance.now() + 80; drag = null; };
-    const onClickCapture = e => { if (performance.now() < suppressUntil) { e.preventDefault(); e.stopPropagation(); } };
-    el.addEventListener('mousedown', onMouseDown);
+    // 记录光标位置：键盘上下键按光标悬停区域路由（信息栏=滚面板/画布=平移清单）。
+    // 鼠标按住拖拽平移已按用户要求移除（劫持 mousedown 干扰点击与下拉交互），平移走滚轮、键盘、触屏单指。
+    const onMouseMove = e => { live.current.cursor = {x: e.clientX, y: e.clientY}; };
     window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    el.addEventListener('click', onClickCapture, true);
     return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('touchmove', onTouchMove); el.removeEventListener('touchend', onTouchEnd);
-      el.removeEventListener('mousedown', onMouseDown); window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); el.removeEventListener('click', onClickCapture, true); };
+      window.removeEventListener('mousemove', onMouseMove); };
   }, []);
   useEffect(() => {
     const key = e => {
@@ -720,7 +754,7 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     <div className="stage-bg"/>
     <NetworkCanvas graph={graph} layout={layout} live={live} reduced={reduced}/>
     <Scene graph={graph} items={stage === 'hub' ? [] : items} sel={sel} live={live} zonePath={zonePath} ancLevels={ancLevels} zone={zone} onModule={id => setFocus({mod: id === mod && stage !== 'hub' ? mod : id, zone: null, sel: null})} onItem={n => {
-      if (n.kind === 'folder' && mod === 'kb') {           // 分区/子目录卡：按卡上的完整路径往里钻一层
+      if (n.kind === 'folder' && (mod === 'kb' || mod === 'services')) {   // 分区/子目录/服务分类卡：按卡上的完整路径往里钻一层
         setFocus({mod, zone: n.path, sel: null});
       } else if (n.kind !== 'ghost') {
         setFocus({mod, zone, sel: n.id});
@@ -762,6 +796,7 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
       <div className="legend-lines"><span><i className="ln mutual"/>双向 <em>Mutual</em></span><span><i className="ln one"/>单向 <em>One-way</em></span></div>
     </div>}
     {stage === 'hub' && <Dock graph={graph} onGo={go}/>}
+    {stage === 'hub' && <EcoStream events={ecoEvents}/>}
     {/* 宽屏 kb 钻取时层级轨迹已由画布上的横排胶囊承担，这里只在窄屏显示，避免两套面包屑重复 */}
     {zoneChain && stage === 'module' && size.w < 760 && <div className="zone-trail" aria-label="层级轨迹">
       {zoneChain.map((c, i) => (
@@ -776,7 +811,7 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     </div>}
     {stage === 'module' && !panned && (targets(live.current, 0).fan?.panMax || 0) > 0 && <div className="pan-hint" aria-hidden="true">▼ 滚轮往下平移清单 <em>{items.length} 条</em></div>}
 
-    {stage === 'module' && <p className="module-hint">{mod === 'kb' && !zone ? '选择一个分区进入' : mod === 'kb' ? '点目录进入下一层 · 点笔记查看全部分析' : '选择一篇笔记查看全部分析'} · <em>Select to explore</em></p>}
+    {stage === 'module' && <p className="module-hint">{mod === 'kb' && !zone ? '选择一个分区进入' : mod === 'services' && !zone ? '选择一个分类进入服务舱' : mod === 'kb' ? '点目录进入下一层 · 点笔记查看全部分析' : '选择一篇笔记查看全部分析'} · <em>Select to explore</em></p>}
 
     {node && <aside className="analysis-wrap" key={sel}>
       <Analysis graph={graph} node={node} module={m} onGo={go} onAction={onAction} onClose={() => setFocus({mod, zone, sel: null})}/>

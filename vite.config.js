@@ -73,15 +73,51 @@ function kbGraphPlugin() {
 const MC_STATE = 'D:/Portable/KnowledgeBase/brain/memorycore/state';
 const MC_POOL = 'D:/Portable/Documents/工作管理/共用工具/memlazy/pool.json';
 
+// ZCode memory 目录（memorycore 降级候选的真身文件）：按文件名建索引，
+// frontmatter 的中文 description 当标题、文件 mtime 当更新日期——记忆池中文化 + 阅读全文的数据源。
+const MEM_ROOT = 'C:/Users/ocean.xu/.zcode/cli/memories/projects';
+let memIdxCache = null, memIdxAt = 0;
+function memIndex() {
+  if (memIdxCache && Date.now() - memIdxAt < 300000) return memIdxCache;
+  const out = new Map();
+  let projects = [];
+  try { projects = fs.readdirSync(MEM_ROOT, {withFileTypes: true}).filter(d => d.isDirectory()); } catch {}
+  for (const p of projects) {
+    const dir = path.join(MEM_ROOT, p.name, 'memory');
+    let files = [];
+    try { files = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.md')); } catch { continue; }
+    for (const f of files) {
+      if (out.has(f)) continue;
+      try {
+        const full = path.join(dir, f);
+        const raw = fs.readFileSync(full, 'utf8');
+        const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+        const desc = fm ? ((fm[1].match(/^description:\s*(.+)$/m) || [])[1] || '') : '';
+        const mt = fs.statSync(full).mtime;
+        out.set(f, {file: full, title: desc.trim().replace(/^['"]|['"]$/g, '').slice(0, 80),
+          updated: mt.toISOString().slice(0, 10)});
+      } catch {}
+    }
+  }
+  memIdxCache = out; memIdxAt = Date.now();
+  return out;
+}
+
 function memoryState() {
   const out = {ok: true, updated: '', pool_n: 0, defer_n: 0, sync: '', items: []};
   try {
     const st = JSON.parse(fs.readFileSync(`${MC_STATE}/memory_state.json`, 'utf8'));
     out.updated = st.updated || '';
+    const idx = memIndex();
     out.items = (st.demote_candidates_report_only || []).slice(0, 12)
       .map(s => String(s).split(') — '))                      // "name.md) — 摘要" 格式
       .filter(p => p.length >= 2)
-      .map(p => ({id: p[0].replace(/\.md$/, '').trim(), title: p[0].replace(/\.md$/, '').trim(), body: p.slice(1).join(' — ').slice(0, 200)}));
+      .map(p => {
+        const name = p[0].replace(/\.md$/, '').trim();
+        const meta = idx.get(name + '.md');
+        return {id: name, title: meta?.title || name, body: p.slice(1).join(' — ').slice(0, 200),
+          updated: meta?.updated || '', md: meta ? name + '.md' : ''};
+      });
   } catch {}
   try { out.pool_n = JSON.parse(fs.readFileSync(MC_POOL, 'utf8')).length; } catch {}
   try { out.defer_n = fs.readdirSync(`${MC_STATE}/defer`).filter(f => f.endsWith('.txt')).length; } catch {}
@@ -104,6 +140,16 @@ function memoryStatePlugin() {
           res.statusCode = 500;
           res.end('{"ok":false}');
         }
+      });
+      // 记忆全文：按文件名在 ZCode memory 目录索引中定位（只索引内文件，basename 防穿越）
+      server.middlewares.use('/api/mem-raw', (req, res) => {
+        const fname = path.basename((q(req).get('id') || ''));
+        const meta = memIndex().get(fname);
+        const json = (code, obj) => { res.statusCode = code; res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify(obj)); };
+        if (!meta || !fname.toLowerCase().endsWith('.md')) return json(400, {ok: false});
+        try {
+          json(200, {ok: true, id: fname, raw: fs.readFileSync(meta.file, 'utf8')});
+        } catch { json(404, {ok: false}); }
       });
     }
   };

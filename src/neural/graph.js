@@ -4,6 +4,21 @@ import {CONFIG} from '../config';
 import {T} from './theme';
 
 export const STATUS_ZH = {pending: '待办', dispatched: '已派', doing: '进行中', waiting_confirm: '待确认', review: '待复核'};
+export const PRIO_ZH = {high: '高', mid: '中', low: '低'};
+// 六状态徽章分色（与 8331 驾驶舱同口径）
+export const ST_COLOR = {pending: '#98a6a1', dispatched: '#a9d3e4', doing: '#7ddc9a', waiting_confirm: '#e8c48c', review: '#c0b8ef', done: '#8fa396'};
+
+// 卡片右侧状态徽章：任务/服务/拍板一眼看状态，记忆显示更新日期
+export function nodeBadge(n) {
+  if (n.kind === 'task') { const s = n.task?.status; return {text: STATUS_ZH[s] || s || '—', color: ST_COLOR[s] || '#98a6a1'}; }
+  if (n.kind === 'service') {
+    if (n.service?.ok) return {text: '在线', color: '#7ddc9a'};
+    return n.service?.state === 'noreport' ? {text: '无心跳', color: '#98a6a1'} : {text: '离线', color: '#ff7385'};
+  }
+  if (n.kind === 'decision') return n.decision?.status === 'pending' ? {text: '待拍', color: '#e8c48c'} : {text: '已结', color: '#7ddc9a'};
+  if (n.kind === 'memory') return n.updated ? {text: String(n.updated).slice(5), color: '#98a6a1'} : null;
+  return null;
+}
 
 export const KINDS = {
   core: {label: '数字生态', en: 'Core', color: T.kinds.core},
@@ -97,10 +112,10 @@ export function buildGraph({tasks = [], decisions = [], memories = [], services 
     link('f:decisions', id, 'contain');
   }
 
-  // 记忆池：M2 接 memorycore 池状态
+  // 记忆池：M2 接 memorycore 池状态（中文标题来自 ZCode memory 文件的 description）
   for (const mm of memories) {
     const id = 'mem:' + mm.id;
-    add({id, kind: 'memory', title: mm.title || mm.id, short: String(mm.title || mm.id).slice(0, 22), path: `记忆池/${mm.id}`, folder: 'f:memory', text: `${mm.title || ''}\n${mm.body || ''}`, body: mm.body || '', memory: mm});
+    add({id, kind: 'memory', title: mm.title || mm.id, short: String(mm.title || mm.id).slice(0, 22), path: `记忆池/${mm.id}`, folder: 'f:memory', text: `${mm.title || ''}\n${mm.body || ''}`, body: mm.body || '', updated: mm.updated || '', memory: mm});
     link('f:memory', id, 'contain');
   }
 

@@ -120,12 +120,30 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .fi-meta em { margin-left: 2px; font-size: 1em; }
 .fi-meta b { color: var(--text); font-weight: 500; }
 .fi-meta .mutual { background: rgba(230, 207, 152, .14); color: #e6cf98; }
+/* 状态徽章：卡右侧分色小胶囊（任务六状态/服务在线离线/拍板待拍已结/记忆日期），色由 --b 注入 */
+.fi-badge { flex: none; margin-left: -2px; padding: 1.5px 7px; border-radius: 999px; font-size: 9.5px; line-height: 1.5; letter-spacing: .02em; color: var(--b); border: 1px solid color-mix(in srgb, var(--b) 45%, transparent); background: color-mix(in srgb, var(--b) 12%, transparent); white-space: nowrap; text-shadow: 0 0 8px color-mix(in srgb, var(--b) 30%, transparent); }
+.fan-item.mini .fi-badge { transform: scale(.92); transform-origin: right center; }
 .fan-item:hover .fi-body { background: rgba(255, 255, 255, .05); border-color: var(--line); }
 .stage-note .fi-title { max-width: 160px; }
 .fan-item.active .fi-body { background: color-mix(in srgb, var(--kc) 14%, rgba(18, 19, 19, .82)); border-color: color-mix(in srgb, var(--kc) 55%, transparent); box-shadow: 0 0 22px color-mix(in srgb, var(--kc) 20%, transparent); }
 
 .hub-copy { position: absolute; left: 40px; top: 104px; max-width: 360px; transition: opacity .6s, transform .6s; animation: introFade 1.2s .5s both; pointer-events: none; }
 .stage-module .hub-copy, .stage-note .hub-copy { opacity: 0; transform: translateY(-10px); }
+.stage-module .ecostream, .stage-note .ecostream { display: none; }
+/* —— 生态流水（hub 左下）：工作站最近事件，30 秒轮询，新到金色高亮 —— */
+.ecostream { position: absolute; left: 28px; bottom: 22px; width: 300px; max-height: 258px; padding: 11px 13px 10px; border-radius: 16px; z-index: 4; display: flex; flex-direction: column; animation: introFade 1s 2.4s both; }
+.intro-done .ecostream { animation-delay: 0s; animation-duration: .5s; }
+.ecostream h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 7px; font-size: 10.5px; letter-spacing: .14em; color: var(--text-2); font-weight: 600; }
+.ecostream h3 em { font-weight: 400; letter-spacing: .08em; }
+.ecostream h3 b { margin-left: auto; color: var(--text); font-weight: 500; letter-spacing: 0; }
+.eco-list { display: grid; gap: 2px; overflow: auto; padding-right: 3px; scrollbar-width: thin; }
+.eco-item { display: flex; align-items: baseline; gap: 6px; font-size: 10.5px; color: var(--text-2); line-height: 1.55; animation: fadeUp .5s both; }
+.eco-item i { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--ec); box-shadow: 0 0 6px var(--ec); align-self: center; }
+.eco-ts { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.eco-txt { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.eco-item.fresh .eco-txt { color: #e6cf98; text-shadow: 0 0 10px rgba(230, 207, 152, .45); }
+.eco-item.fresh i { animation: ecoPulse 1.6s ease-in-out infinite; }
+@keyframes ecoPulse { 50% { transform: scale(1.7); } }
 .hub-copy h1 { margin: 0; font-size: clamp(28px, 2.8vw, 42px); line-height: 1.18; font-weight: 600; letter-spacing: .02em; background: linear-gradient(120deg, #ffffff 30%, #d6d7d3 62%, #e6cf98); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .hub-en { margin: 8px 0 0; font-size: 14px; color: var(--text-2); letter-spacing: .04em; }
 .hub-meta { margin: 18px 0 0; font-size: 12px; color: var(--text-2); }
@@ -186,6 +204,15 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .dock-chips .me { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-2); padding: 4px 9px; border-radius: 8px; background: rgba(255, 255, 255, .05); }
 .dock-chips button { font-size: 11px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--text-2); }
 .dock-chips button:hover { color: var(--text); border-color: rgba(236, 236, 232, .35); background: rgba(236, 236, 232, .07); }
+/* —— 输入引导：壁纸模式输入法挂不上，聚焦时提示 + 点选快捷追问 —— */
+.ask-hint { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 10px; border-radius: 10px; border: 1px solid rgba(230, 207, 152, .25); background: rgba(230, 207, 152, .07); font-size: 11px; color: var(--text-2); animation: fadeUp .3s both; }
+.ask-hint span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.ask-hint button { flex: none; border: 0; background: none; color: #e6cf98; font-size: 11px; padding: 2px 4px; display: inline-flex; align-items: center; gap: 3px; border-bottom: 1px dashed rgba(230, 207, 152, .5); }
+.an-ask-chips { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; padding-top: 8px; }
+.an-ask-chips .me { font-size: 10px; color: var(--muted); }
+.an-ask-chips button { font-size: 10.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--text-2); }
+.an-ask-chips button:hover { color: var(--text); border-color: rgba(236, 236, 232, .35); background: rgba(236, 236, 232, .07); }
+.an-ask-chips .win-open { flex-basis: 100%; justify-content: center; color: #e6cf98; border-color: rgba(230, 207, 152, .3); border-style: dashed; animation: fadeUp .3s both; }
 .ask-results { max-height: min(46vh, 420px); overflow: auto; padding: 12px; border-radius: 16px; background: var(--glass-strong); animation: fadeUp .45s both; }
 .ask-results header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 12px; font-weight: 600; letter-spacing: .08em; }
 .ask-results header span { display: inline-flex; align-items: center; gap: 6px; }
@@ -286,6 +313,19 @@ button.chip:hover { background: color-mix(in srgb, var(--kc, #9db3af) 22%, trans
 .link-group p { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; font-size: 11.5px; color: var(--text-2); }
 .link-group p i { width: 18px; color: #e6cf98; font-style: normal; text-align: center; }
 .link-group p b { margin-left: 4px; color: var(--text); font-weight: 500; }
+/* —— 任务执行现场：附件缩略网格 + 事件时间线 + 灯箱 —— */
+.an-atts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
+.an-att-img { padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: rgba(255, 255, 255, .03); cursor: zoom-in; }
+.an-att-img img { display: block; width: 100%; height: 96px; object-fit: cover; }
+.an-att-img:hover { border-color: rgba(230, 207, 152, .5); }
+.an-att-video { width: 100%; grid-column: 1 / -1; border-radius: 10px; border: 1px solid var(--line); background: #000; }
+.an-timeline { display: grid; gap: 3px; max-height: 240px; overflow: auto; padding-right: 4px; }
+.tl-item { display: flex; gap: 7px; font-size: 11px; color: var(--text-2); line-height: 1.45; }
+.tl-item .ts { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tl-item .who { flex: none; color: var(--text); }
+.tl-item .txt { min-width: 0; word-break: break-all; }
+.lightbox { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(8, 9, 9, .88); backdrop-filter: blur(8px); cursor: zoom-out; animation: fadeUp .25s both; }
+.lightbox img { max-width: 92vw; max-height: 92vh; border-radius: 12px; box-shadow: 0 24px 80px rgba(0, 0, 0, .6); }
 .an-ask { border-top: 1px solid var(--line); padding: 12px 16px 12px; background: rgba(12, 13, 13, .62); }
 .an-ask form { position: relative; display: flex; align-items: center; }
 .an-ask input { width: 100%; height: 40px; padding: 0 46px 0 16px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .55); background: rgba(255, 255, 255, .07); outline: none; box-shadow: 0 0 18px rgba(255, 255, 255, .06); }
@@ -510,6 +550,7 @@ button.chip:hover { background: color-mix(in srgb, var(--kc, #9db3af) 22%, trans
   .library-analysis { position: static; height: 72vh; }
   .legend { display: none; }
   .top-actions .pill.ghost { display: none; }
+  .ecostream { display: none; }   /* 窄屏空间不足，流水只在宽屏 hub 展示 */
 }
 @media (max-width: 760px) {
   .topbar { grid-template-columns: auto 1fr; padding: 0 12px; height: 56px; }

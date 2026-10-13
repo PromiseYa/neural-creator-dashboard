@@ -1,5 +1,5 @@
 import React, {useEffect, useMemo, useState} from 'react';
-import {KINDS, CONTENT, MODULES, neighbors, latent, askGraph, LINK_KINDS, LINK_EN, STATUS_ZH} from './graph';
+import {KINDS, CONTENT, MODULES, neighbors, latent, askGraph, LINK_KINDS, LINK_EN, STATUS_ZH, PRIO_ZH} from './graph';
 import {Icon} from './icons';
 import {stripFrontmatter, firstImage} from './markdown';
 
@@ -7,13 +7,17 @@ const fmt = (v, d = 0) => v == null || Number.isNaN(v) ? '—' : Number(v).toLoc
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function Count({value, decimals = 0, suffix = ''}) {
-  const [v, setV] = useState(reducedMotion() ? value : 0);
+  // 页面不可见时 rAF 冻结（壁纸常被窗口遮挡），数字会停在半路甚至挂 0：隐藏期直显终值，回桌面不重滚
+  const instant = () => reducedMotion() || document.hidden;
+  const [v, setV] = useState(instant() ? value : 0);
   useEffect(() => {
-    if (value == null || reducedMotion()) { setV(value); return; }
+    if (value == null || instant()) { setV(value); return; }
     let raf; const t0 = performance.now();
     const run = now => { const p = Math.min(1, (now - t0) / 1000); setV(value * (1 - Math.pow(1 - p, 3))); if (p < 1) raf = requestAnimationFrame(run); };
     raf = requestAnimationFrame(run);
-    return () => cancelAnimationFrame(raf);
+    const onHide = () => { if (document.hidden) { cancelAnimationFrame(raf); setV(value); } };
+    document.addEventListener('visibilitychange', onHide);
+    return () => { cancelAnimationFrame(raf); document.removeEventListener('visibilitychange', onHide); };
   }, [value]);
   return <>{fmt(v, decimals)}{value != null && suffix}</>;
 }
@@ -60,6 +64,7 @@ function Links({graph, node, onGo}) {
     ['反链', 'Backlinks', '←', nb.back, l => LINK_EN[l.link.kind]],
     ['二度关联', 'Latent', '⋯', lat, l => 'via ' + l.via.slice(0, 2).join('、')]
   ].filter(g => g[3].length);
+  if (!groups.length) return null;   // 任务/服务/拍板等常无链接：空节不渲染，标题不孤悬
   return <section className="an-section">
     <h3>双向链接 <em>Bidirectional links</em></h3>
     {groups.map(([zh, en, arrow, list, sub]) => <div className="link-group" key={zh}>
@@ -113,23 +118,68 @@ function RelatedSearch({node}) {
 function AskBox({graph, node, onGo}) {
   const [q, setQ] = useState('');
   const [res, setRes] = useState(null);
+  const [asking, setAsking] = useState(false);   // 输入框聚焦：壁纸模式输入法挂不上，提示改走点选/窗口
+  const QUICK = ['相关内容', '双向连接', '最核心的内容'];
   return <div className="an-ask">
     {res && <div className="an-ask-res">{res.map((c, i) => <div key={i} className={`ask-card mini tone-${c.tone}`}>
       <h4>{c.title} <em>{c.en}</em></h4><p>{c.text}</p>
       {c.items?.length > 0 && <div className="chip-row">{c.items.slice(0, 6).map(id => <Chip key={id} graph={graph} id={id} onGo={onGo}/>)}</div>}
     </div>)}</div>}
     <form onSubmit={e => { e.preventDefault(); if (q.trim()) setRes(askGraph(graph, q, node.id)); }}>
-      <input value={q} onChange={e => setQ(e.target.value)} placeholder="追问这条内容… Ask about this note" aria-label="追问这条内容"/>
+      <input value={q} onChange={e => setQ(e.target.value)} onFocus={() => setAsking(true)} onBlur={() => setAsking(false)} placeholder="追问这条内容… Ask about this note" aria-label="追问这条内容"/>
       <button aria-label="提交"><Icon name="send" size={15}/></button>
     </form>
+    <div className="an-ask-chips">
+      <span className="me">快捷追问</span>
+      {QUICK.map(t => <button key={t} type="button" onClick={() => { setQ(t); setRes(askGraph(graph, t, node.id)); }}>{t}</button>)}
+      {asking && <button type="button" className="win-open" onClick={() => window.open('http://127.0.0.1:5173/', '_blank')}>壁纸模式打不了中文 · 在窗口中打开<Icon name="outlink" size={11}/></button>}
+    </div>
     <div className="an-ask-foot"><span><Icon name="agent" size={13}/>我的图谱 <em>My graph</em></span><span><Icon name="spark" size={13}/>本地分析 <em>Local analysis</em></span></div>
   </div>;
 }
 
 const sharedConcepts = (a, b) => (a.shared || []).filter(x => (b.shared || []).includes(x));
 
-// 详情补充数据（R21）：8331 列表投影裁掉的长文本（任务 notes/source_ref、拍板 proposal/why/impact、
-// 笔记全文）按需从 vite 只读通道补——打开详情栏才拉一次，不进 30 秒轮询。
+// 任务执行现场（与 8331 详情抽屉同源）：事件时间线 + 附件（图片缩略图点击灯箱放大，视频内嵌可播）。
+// 附件文件本体走 vite 代理 /hub/attach/<tid>/<文件>，只读。
+const VIDEO_EXT = ['.mp4', '.mov', '.webm', '.avi', '.mkv'];
+function TaskExtra({tid, detail}) {
+  const events = detail?.events || [];
+  const atts = detail?.attachments || [];
+  const [zoom, setZoom] = useState(null);
+  useEffect(() => {
+    if (!zoom) return;
+    const key = e => { if (e.key === 'Escape' && !e.isComposing) setZoom(null); };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [zoom]);
+  if (!events.length && !atts.length) return null;
+  return <section className="an-section">
+    <h3><Icon name="pulse" size={14}/>执行现场 <em>Activity &amp; attachments</em></h3>
+    {atts.length > 0 && <div className="an-atts">
+      {atts.map(f => {
+        const url = `/hub/attach/${encodeURIComponent(tid)}/${encodeURIComponent(f)}`;
+        return VIDEO_EXT.some(ext => f.toLowerCase().endsWith(ext))
+          ? <video key={f} className="an-att-video" src={url} controls preload="metadata"/>
+          : <button key={f} className="an-att-img" onClick={() => setZoom(url)} aria-label={`放大查看 ${f}`}><img src={url} alt={f} loading="lazy"/></button>;
+      })}
+    </div>}
+    {events.length > 0 && <div className="an-timeline">
+      {events.slice(0, 20).map((e, i) => (
+        <div key={i} className="tl-item">
+          <span className="ts">{String(e.ts || '').slice(5, 16)}</span>
+          <span className="who">{e.actor || ''}{e.action ? '/' + e.action : ''}</span>
+          <span className="txt">{e.detail || ''}</span>
+        </div>
+      ))}
+      {events.length > 20 && <div className="tl-item"><span className="ts"/><span className="txt">…共 {events.length} 条，更早的看驾驶舱</span></div>}
+    </div>}
+    {zoom && <div className="lightbox" onClick={() => setZoom(null)} role="dialog" aria-label="附件大图"><img src={zoom} alt=""/></div>}
+  </section>;
+}
+
+// 详情补充数据：任务走 8331 详情接口（任务全行+事件流+附件清单，经 vite 代理只读），
+// 拍板/笔记按需从 vite 只读通道补——打开详情栏才拉一次，不进 30 秒轮询。
 function useDetail(node) {
   const tid = node?.kind === 'task' ? node.task?.id : null;
   const did = node?.kind === 'decision' ? node.decision?.id : null;
@@ -140,7 +190,7 @@ function useDetail(node) {
     setD(null);
     if (!tid && !did && !nid) return;
     let stop = false;
-    const url = tid ? `/api/hub-detail?t=${encodeURIComponent(tid)}`
+    const url = tid ? `/hub/api/task?id=${encodeURIComponent(tid)}`
       : did ? `/api/hub-detail?d=${encodeURIComponent(did)}`
       : `/api/note-raw?id=${encodeURIComponent(nid)}`;
     fetch(url).then(r => r.json())
@@ -179,7 +229,7 @@ function analyze(graph, node, detail) {
   if (node.kind === 'task') {
     const T = graph.nodes.filter(n => n.kind === 'task');
     const t = node.task || {};
-    const full = detail?.row || {};                       // hub-detail 补的长文本字段
+    const full = detail?.task || {};                       // 8331 详情接口的任务全行（notes/confidence/attachments 等长文本都在）
     const notes = String(full.notes || '');
     const st = STATUS_ZH[t.status] || t.status || '—';
     const same = T.filter(x => x.task?.status === t.status).length;
@@ -190,7 +240,7 @@ function analyze(graph, node, detail) {
     if (full.deliverables) extras.push(['交付物', 'Deliverables', String(full.deliverables), 'info']);
     if (full.rollback_ref) extras.push(['回滚点', 'Rollback', String(full.rollback_ref), 'muted']);
     return {
-      badge: [st, 'Status'], status: `${t.id || ''} · 优先级 ${t.priority || '—'} · 截止 ${t.due || '—'}${dueDays(t.due)}`,
+      badge: [st, 'Status'], status: `${t.id || ''} · 优先级 ${PRIO_ZH[t.priority] || t.priority || '—'} · 截止 ${t.due || '—'}${dueDays(t.due)}`,
       ops: OPS.map(([zh, en, op, target]) => ({zh, en, op, cur: t.status === target})),
       action: ['驾驶舱（备用）', 'Station · backup', {type: 'station'}],
       metric: {label: '同状态任务', en: 'Same status', value: T.length ? 100 * same / T.length : 0, decimals: 0,
@@ -233,7 +283,8 @@ function analyze(graph, node, detail) {
     const M = graph.nodes.filter(n => n.kind === 'memory');
     const mm = node.memory || {};
     return {
-      badge: ['记忆条目', 'Memory item'], status: mm.id ? `memorycore · ${mm.id}` : 'memorycore 记忆池',
+      badge: ['记忆条目', 'Memory item'], status: `memorycore${mm.updated ? ` · 更新 ${mm.updated}` : ''}${mm.id ? ` · ${mm.id}` : ''}`,
+      action: mm.md ? ['阅读全文', 'Read memory', {type: 'read', id: node.id}] : null,
       metric: {label: '记忆池条目', en: 'Pool size', value: M.length, decimals: 0,
         level: M.length ? ['在线', 'Live', 'high'] : ['空池', 'Empty', 'low'], delta: `${M.length}`, deltaEn: 'items', bars: M.map(x => ({v: 1, on: x === node, label: x.short}))},
       tiles: [['file', (mm.body || node.body || '').length, '摘要字数', 'Chars'], ['link', d.both, '关联', 'Links'], ['spark', mm.id ? 1 : 0, '有条目', 'Item'], ['agent', M.length, '池条目', 'Pool']],
@@ -388,6 +439,7 @@ export function Analysis({graph, node, module, onGo, onAction, onClose}) {
       <Tiles tiles={a.tiles}/>
       {a.all && <section className="an-section"><h3>全部指标 <em>All metrics</em></h3><div className="an-all">{a.all.map(([zh, en, v]) => <div key={zh}><span>{zh}<em>{en}</em></span><b>{v}</b></div>)}</div></section>}
       <Insights items={a.insights}/>
+      {node.kind === 'task' && detail?.ok && <TaskExtra tid={node.task?.id} detail={detail}/>}
       {node.kind === 'note' && <RelatedSearch node={node}/>}
       {node.tags?.length > 0 && <section className="an-section"><h3>话题标签 <em>Topics</em></h3><div className="chip-row">{node.tags.map(t => <span key={t} className="chip static" style={{'--kc': KINDS.tag.color}}>#{t}</span>)}</div></section>}
       <Links graph={graph} node={node} onGo={onGo}/>

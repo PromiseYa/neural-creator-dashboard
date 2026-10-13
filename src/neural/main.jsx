@@ -36,7 +36,7 @@ function Modal({title, en, onClose, children, wide}) {
   </div>;
 }
 
-// 阅读全文（R21）：按需拉 /api/note-raw 全文，本地轻量渲染（markdown.js）；
+// 阅读全文（R21）：笔记按需拉 /api/note-raw、记忆条目拉 /api/mem-raw，本地轻量渲染（markdown.js）；
 // [[双链]] 渲染成按钮，点击在星图内跳到那篇笔记（按标题/文件名匹配，找不到关弹窗回星图）。
 function Reader({node, graph, onJump, onClose}) {
   const [data, setData] = useState(null);
@@ -45,8 +45,11 @@ function Reader({node, graph, onJump, onClose}) {
     let stop = false;
     setData(null);
     setErr(false);
-    const nid = node.path || String(node.id).replace(/^note:/, '');   // 图谱 id 带 note: 前缀，接口要 KB 相对路径
-    fetch(`/api/note-raw?id=${encodeURIComponent(nid)}`)
+    // note 的图谱 id 带 note: 前缀，接口要 KB 相对路径；memory 走 ZCode memory 目录全文接口（按文件名）
+    const url = node.kind === 'memory'
+      ? `/api/mem-raw?id=${encodeURIComponent(node.memory?.md || '')}`
+      : `/api/note-raw?id=${encodeURIComponent(node.path || String(node.id).replace(/^note:/, ''))}`;
+    fetch(url)
       .then(r => r.ok ? r.json() : Promise.reject(new Error(r.status)))
       .then(d => { if (!stop && d?.ok) setData(d); else if (!stop) setErr(true); })
       .catch(() => { if (!stop) setErr(true); });
@@ -69,8 +72,8 @@ function Reader({node, graph, onJump, onClose}) {
   return <Modal title={node.short || node.title} en={KINDS[node.kind].en} onClose={onClose} wide>
     <div className="reader" onClick={jump}>
       <p className="md-meta">
-        <span className="quiet">{node.path}</span>
-        {meta.updated && <span className="chip static mini">更新 {meta.updated}</span>}
+        <span className="quiet">{node.kind === 'memory' ? `memorycore · ${node.memory?.id || ''}` : node.path}</span>
+        {(meta.updated || node.updated) && <span className="chip static mini">更新 {(meta.updated || node.updated)}</span>}
         {meta.created && <span className="chip static mini">建于 {meta.created}</span>}
         {data && <span className="chip static mini">{body.replace(/\s/g, '').length} 字</span>}
         {rendered?.images > 0 && <span className="chip static mini">{rendered.images} 图</span>}
@@ -161,7 +164,7 @@ function App() {
     </header>
 
     <main>
-      <Home graph={graph} layout={layout} focus={focus} setFocus={setFocus} onAction={onAction} onAbout={() => setModal('about')} reduced={reduced}/>
+      <Home graph={graph} layout={layout} focus={focus} setFocus={setFocus} onAction={onAction} onAbout={() => setModal('about')} reduced={reduced} ecoEvents={eco?.events || []}/>
     </main>
 
     <footer className="site-foot">
@@ -177,11 +180,12 @@ function App() {
         <hr/>
         <h3>五个模块的数据来源 <em>Where the data comes from</em></h3>
         <ul>
-          <li><b>任务流 Tasks</b>：工作站未结任务（T-xxx），来自 8331 实体投影；详情栏显示任务内容/调度溯源，可直接改状态（完成/进行/待确认/退回）。</li>
+          <li><b>任务流 Tasks</b>：工作站未结任务（T-xxx），来自 8331 实体投影；详情栏显示任务内容/执行时间线/截图视频附件，可直接改状态（完成/进行/待确认/退回）。</li>
           <li><b>知识库 Knowledge</b>：本地知识库 markdown 笔记现场扫描，[[双链]] 与话题标签自动连线；分区 → 子目录 → 笔记逐层钻入，长清单用滚轮往下平移；详情栏看正文预览，「阅读全文」渲染 markdown（标题/表格/代码块/图片），双链可点在图内跳转。</li>
           <li><b>拍板台 Decisions</b>：三门槛落账的待拍板事项（D-xxx），详情栏就地收口（批准走执行链，多方案可选）。</li>
-          <li><b>记忆池 Memory</b>：memorycore 池条目实时状态（降级候选摘要）。</li>
-          <li><b>服务舱 Services</b>：核心服务健康探测 + 常驻工作者心跳。</li>
+          <li><b>记忆池 Memory</b>：memorycore 池条目实时状态（降级候选摘要，中文标题）；可点「阅读全文」看整条记忆。</li>
+          <li><b>服务舱 Services</b>：核心服务与常驻工作者两级分类；健康探测 + 心跳，卡片右侧直接看在线状态。</li>
+          <li><b>生态流水 Stream</b>：左下角工作站最近事件（派发/状态/拍板），30 秒轮询，新到的金色高亮。</li>
         </ul>
         <p>当前：{s.content} 条内容 · {s.links} 条连接 · {s.mutual} 组双向 · {s.ghosts} 个未创建双链。</p>
         <p className="quiet">数据全部本机，不外发；任务与拍板都能在详情栏直接收口，驾驶舱留作备用入口。<em>Local first, nothing is published.</em></p>
