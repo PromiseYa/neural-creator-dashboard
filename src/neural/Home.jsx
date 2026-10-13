@@ -94,7 +94,18 @@ export function moduleItems(graph, modId, zone) {
     if (zone === '待办') return all.filter(n => n.task?.status !== 'done')
       .sort((a, b) => String(b.task?.updated_at || '').localeCompare(String(a.task?.updated_at || '')));
     if (zone === '今日完成') return doneList.filter(n => String(n.task?.done_at || '').slice(0, 10) === today).sort(byDone);
-    if (zone === '累计完成') return doneList.sort(byDone);
+    const doneMs = n => Date.parse(String(n.task?.done_at || '').replace(' ', 'T')) || 0;
+    if (zone === '累计完成') {
+      // 第三层：按完成时间滚动窗口分类（1天⊂3天⊂一周⊂一月⊂所有）
+      const now = Date.now();
+      const win = d => doneList.filter(n => now - doneMs(n) <= d * 864e5).length;
+      const card = (t, cnt) => ({id: 'f:task:w' + t, kind: 'folder', title: t, short: t, count: cnt, unit: '条', path: '累计完成/' + t, level: 3});
+      return [card('最近1天', win(1)), card('最近3天', win(3)), card('最近一周', win(7)), card('最近一月', win(30)), card('所有', doneList.length)];
+    }
+    if (zone.startsWith('累计完成/')) {
+      const d = {'最近1天': 1, '最近3天': 3, '最近一周': 7, '最近一月': 30}[zone.split('/')[1]];
+      return (d ? doneList.filter(n => Date.now() - doneMs(n) <= d * 864e5) : doneList).sort(byDone);
+    }
     return [];
   }
   // 服务舱两级钻取（与知识库分区同款语法）：第一层=核心服务/常驻工作者两张分类卡，
@@ -144,7 +155,7 @@ const HB_ZH = {ok: '心跳正常', noreport: '无心跳', late: '心跳迟到'};
 function itemMeta(n) {
   const d = split(n);
   switch (n.kind) {
-    case 'folder': return [[n.unit || (n.online != null ? '服务' : '篇数'), n.online != null ? 'Services' : 'Notes', n.count || 0], n.online != null ? ['在线', 'Online', n.online] : ['', '', ''], ['', '', '']];
+    case 'folder': return [[n.unit || (n.online != null ? '服务' : '篇数'), n.unit ? '' : (n.online != null ? 'Services' : 'Notes'), n.count || 0], n.online != null ? ['在线', 'Online', n.online] : ['', '', ''], ['', '', '']];
     case 'task': return [[STATUS_ZH[n.task?.status] || n.task?.status || '—', '', ''], [PRIO_ZH[n.task?.priority] || n.task?.priority || '—', '', ''], ['↔', '', d.both]];
     case 'note': return [['出链', 'Out', d.out], ['反链', 'In', d.back], ['↔', '', d.both]];
     case 'decision': return [[n.decision?.status || '—', '', ''], [String(n.decision?.created_at || '').slice(5, 10) || '—', '', ''], ['↔', '', d.both]];
@@ -578,20 +589,27 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           <span className="fi-meta">{meta.map(([k, en, v], j) => <span key={j} className={k === '↔' ? 'mutual' : ''}>{k}{en && <em>{en}</em>} {v !== '' && <b>{v}</b>}</span>)}</span>
         </span>
         {n.kind === 'task' && bd ? (
-          // 状态徽章悬停扇形展开可切换状态（卡片本身是 button，内部用 span role=button 避免 button 嵌套）
+          // 状态徽章悬停后按"下一层连线"语法展开：五条发光触须各自连出一张状态小卡，
+          // 右向弧形张开（-24°~+24°），不与上下任务卡重叠；卡片本身是 button，内部用 span role=button 防嵌套
           <span className="st-swap" onClick={e => e.stopPropagation()}>
             <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>
-            <span className="st-fan" aria-label="切换任务状态">
-              {TASK_OPS.map(([zh, target, op], k) => {
-                const cur = n.task?.status === target;
-                return <span key={target} role="button" tabIndex={cur ? -1 : 0} aria-disabled={cur}
-                  className={`st-opt${cur ? ' cur' : ''}`} style={{'--b': ST_COLOR[target], '--i': k}}
-                  onClick={ev => { ev.stopPropagation(); if (!cur) onAction({type: 'taskOp', id: n.task?.id, op}); }}
-                  onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); if (!cur) onAction({type: 'taskOp', id: n.task?.id, op}); } }}>
+            {TASK_OPS.map(([zh, target, op], k) => {
+              const cur = n.task?.status === target;
+              const ang = -24 + k * 12;                       // -24° ~ +24° 扇形张开
+              const rad = ang * Math.PI / 180;
+              const len = 54 + Math.abs(k - 2) * 4;           // 中间稍短，弧顶收拢
+              const ex = Math.round(Math.cos(rad) * len), ey = Math.round(Math.sin(rad) * len);
+              const fire = () => { if (!cur) onAction({type: 'taskOp', id: n.task?.id, op}); };
+              return <React.Fragment key={target}>
+                <span className="st-line" style={{'--b': ST_COLOR[target], '--ang': rad + 'rad', '--len': len + 'px', '--d': k}}/>
+                <span role="button" tabIndex={cur ? -1 : 0} aria-disabled={cur}
+                  className={`st-node${cur ? ' cur' : ''}`} style={{'--b': ST_COLOR[target], '--d': k, left: `calc(100% + ${ex - 4}px)`, top: `calc(50% + ${ey}px)`}}
+                  onClick={ev => { ev.stopPropagation(); fire(); }}
+                  onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); fire(); } }}>
                   {cur ? '✓ ' : ''}{zh}
-                </span>;
-              })}
-            </span>
+                </span>
+              </React.Fragment>;
+            })}
           </span>
         ) : bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}
       </button>;
@@ -655,10 +673,21 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   const zoneChain = useMemo(() => {
     if ((mod !== 'kb' && mod !== 'services' && mod !== 'tasks') || !zone) return null;
     if (mod === 'tasks') {
-      // 任务流两级链：任务流 → 分类（待办/今日完成/累计完成），计数=各自清单
+      // 任务流链：→ 分类（待办/今日完成/累计完成）→ 累计完成下再按时间窗（1天/3天/一周/一月/所有）
       const T = graph.nodes.filter(x => x.kind === 'task');
       const today = new Date().toISOString().slice(0, 10);
       const done = T.filter(x => x.task?.status === 'done');
+      const parts = zone.split('/');
+      const doneMs = x => Date.parse(String(x.task?.done_at || '').replace(' ', 'T')) || 0;
+      const winCnt = d => done.filter(x => Date.now() - doneMs(x) <= d * 864e5).length;
+      if (parts[0] === '累计完成' && parts.length > 1) {
+        const d = {'最近1天': 1, '最近3天': 3, '最近一周': 7, '最近一月': 30}[parts[1]];
+        return [
+          {name: '任务流', zone: null, n: T.length - done.length},
+          {name: '累计完成', zone: '累计完成', n: done.length},
+          {name: parts[1], zone, n: d ? winCnt(d) : done.length}
+        ];
+      }
       const n = zone === '待办' ? T.length - done.length
         : zone === '今日完成' ? done.filter(x => String(x.task?.done_at || '').slice(0, 10) === today).length
         : done.length;
