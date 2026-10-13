@@ -213,3 +213,7 @@ function App() {
 }
 
 createRoot(document.getElementById('root')).render(<App/>);
+
+// 壁纸模式标记（WebView2 宿主里才存在 chrome.webview）：底部元素避让任务栏区，
+// 浏览器窗口模式无任务栏遮挡不受影响
+if (window.chrome?.webview) document.body.classList.add('wallpaper-mode');

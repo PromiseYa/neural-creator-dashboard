@@ -620,3 +620,9 @@ button.chip:hover { background: color-mix(in srgb, var(--kc, #9db3af) 22%, trans
 @media (prefers-reduced-motion: reduce) {
   .neural *, .neural *::before, .neural *::after { animation-duration: .01ms !important; animation-delay: 0ms !important; transition-duration: .01ms !important; }
 }
+
+/* —— 壁纸模式（body.wallpaper-mode）：底部元素避让任务栏（约 48px）——查询框不在任务栏区，
+   点击不会顶开任务栏抢焦点（输入框 focus/blur 抖动=提示条反复弹的根源之一） —— */
+.wallpaper-mode .dock { bottom: 76px; }
+.wallpaper-mode .module-hint { bottom: 70px; }
+.wallpaper-mode .pan-hint { bottom: 70px; }

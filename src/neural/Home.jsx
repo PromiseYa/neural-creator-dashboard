@@ -640,6 +640,12 @@ function Dock({graph, onGo}) {
   const [q, setQ] = useState('');
   const [cards, setCards] = useState(null);
   const [asking, setAsking] = useState(false);   // 输入框聚焦：壁纸模式输入法挂不上，提示改走窗口输入
+  const hintT = useRef(null);                    // 失焦防抖：焦点抖动（系统抢焦点又抢回）时不让提示条闪烁
+  const askHint = v => {
+    clearTimeout(hintT.current);
+    if (v) setAsking(true);
+    else hintT.current = setTimeout(() => setAsking(false), 350);
+  };
   const typing = useRef(null);
   const ask = text => { if (text.trim()) setCards({q: text, list: askGraph(graph, text)}); };
   const typeAsk = text => {
@@ -663,7 +669,7 @@ function Dock({graph, onGo}) {
     <div className="dock-panel glass">
       <div className="dock-kpis">{kpis.map(([k, en, v]) => <div key={k}><span>{k} <em>{en}</em></span><strong>{v}</strong></div>)}</div>
       <form className="ask" onSubmit={e => { e.preventDefault(); ask(q); }}>
-        <input value={q} onChange={e => setQ(e.target.value)} onFocus={() => { setAsking(true); wvFocus(); }} onBlur={() => { setAsking(false); wvBlur(); }} placeholder="问问你的生态图谱… Ask your graph" aria-label="向图谱提问"/>
+        <input value={q} onChange={e => setQ(e.target.value)} onFocus={() => { askHint(true); wvFocus(); }} onBlur={() => { askHint(false); wvBlur(); }} placeholder="问问你的生态图谱… Ask your graph" aria-label="向图谱提问"/>
         <button className="send" aria-label="提交问题"><Icon name="send" size={16}/></button>
       </form>
       {asking && <div className="ask-hint">
