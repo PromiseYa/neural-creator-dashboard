@@ -36,7 +36,7 @@ function EcoStream({events, top}) {
   return <div className="ecostream" style={{top}} aria-label="生态流水">
     <h3>生态流水 <em>Stream</em><b>{events.length}</b></h3>
     <div className="eco-list">
-      {events.slice(0, 14).map(e => (
+      {events.map(e => (
         <div key={e.id ?? (e.ts + (e.detail || ''))} className={`eco-item${freshIds.has(e.id) ? ' fresh' : ''}`}>
           <i style={{'--ec': ACT_COLOR[e.kind] || ACT_COLOR.event}}/>
           <span className="eco-ts">{String(e.ts || '').slice(5, 16)}</span>
@@ -223,7 +223,9 @@ export function targets(L, t) {
     const zchain = L.zonePath || [];
     const zdRaw = zchain.length > 1 ? zchain.length - 1 : 0;   // kb 与 services 都走层级链（zonePath 只有这两个模块有值）
     const zd = Math.min(zdRaw, 2);
-    const SX = [fanBase, fanBase + 200, fanBase + 400];
+    // 列间距 240：卡宽约 200+触须空隙——间距 200 时上一列卡片右缘会压到下一列起点，
+    // 触须被迫向左折回交织（核心服务→工作站那层"线条扭在一起"的根源）
+    const SX = [fanBase, fanBase + 240, fanBase + 480];
     const fit = !zd || SX[zd] + 270 <= W - 24;
     const span = Math.max(0, n - 1) * fgap;
     // 清单顶部让位：不越过最上方水母（其下方留 70px）——鼠标点水母不被细项卡挡住，触须也更舒展
@@ -595,9 +597,9 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
             <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>
             {TASK_OPS.map(([zh, target, op], k) => {
               const cur = n.task?.status === target;
-              const ang = -24 + k * 12;                       // -24° ~ +24° 扇形张开
+              const ang = -44 + k * 22;                      // -44° ~ +44°：节点垂直错开 ≥24px 不叠卡
               const rad = ang * Math.PI / 180;
-              const len = 54 + Math.abs(k - 2) * 4;           // 中间稍短，弧顶收拢
+              const len = 58 + Math.abs(k - 2) * 7;          // 弧形：中间短两侧长
               const ex = Math.round(Math.cos(rad) * len), ey = Math.round(Math.sin(rad) * len);
               const fire = () => { if (!cur) onAction({type: 'taskOp', id: n.task?.id, op}); };
               return <React.Fragment key={target}>
@@ -772,8 +774,8 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     if (!el) return;
     const onWheel = e => {
       const L = live.current;
-      // 信息栏（最右详情块）/弹窗/搜索结果内部是原生滚动区：事件落在里面就放行，不劫持成平移
-      if (e.target?.closest?.('.analysis-wrap, .veil, .ask-results')) return;
+      // 信息栏（最右详情块）/弹窗/搜索结果/生态流水内部是原生滚动区：事件落在里面就放行，不劫持成平移
+      if (e.target?.closest?.('.analysis-wrap, .veil, .ask-results, .ecostream')) return;
       const w = el.clientWidth, h = el.clientHeight;
       if (w && (L.size.w !== w || L.size.h !== h)) { L.size = {w, h}; setSize({w, h}); }
       if (L.stage === 'hub') return;   // module 和 note（笔记开着）都允许滚轮平移清单——否则点开一篇后长清单被锁死没法选其他篇
@@ -788,7 +790,7 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     let touchPt = null;
     const onTouchMove = e => {
       const L = live.current;
-      if (e.touches.length !== 1 || e.target?.closest?.('.analysis-wrap, .veil, .ask-results')) { touchPt = null; return; }
+      if (e.touches.length !== 1 || e.target?.closest?.('.analysis-wrap, .veil, .ask-results, .ecostream')) { touchPt = null; return; }
       const t = e.touches[0];
       if (touchPt && L.stage !== 'hub') {
         const panMax = targets(L, 0).fan?.panMax || 0;
@@ -910,11 +912,8 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
       <div className="legend-lines"><span><i className="ln mutual"/>双向 <em>Mutual</em></span><span><i className="ln one"/>单向 <em>One-way</em></span></div>
     </div>}
     {stage === 'hub' && <Dock graph={graph} onGo={go}/>}
-    {/* 流水：hub=左上文案下方起（红框位置），一路垂到屏幕底填满左侧；模块/笔记=选中水母正下方一点起。
-        层级在光球场景之下（文字不压光球），底部渐隐虚无。 */}
-    <EcoStream events={ecoEvents} top={stage === 'hub'
-      ? Math.round(Math.max(360, size.h * .3))
-      : Math.round(size.h * .53 + 96)}/>
+    {/* 流水：全视图固定左侧（左上文案下方起、垂到屏幕底），随时可查；面板内滚轮/触屏滚动，底部渐隐 */}
+    <EcoStream events={ecoEvents} top={Math.round(Math.max(360, size.h * .3))}/>
     {/* 宽屏 kb 钻取时层级轨迹已由画布上的横排胶囊承担，这里只在窄屏显示，避免两套面包屑重复 */}
     {zoneChain && stage === 'module' && size.w < 760 && <div className="zone-trail" aria-label="层级轨迹">
       {zoneChain.map((c, i) => (

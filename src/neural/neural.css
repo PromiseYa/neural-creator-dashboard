@@ -140,16 +140,15 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 
 .hub-copy { position: absolute; left: 40px; top: 104px; max-width: 360px; transition: opacity .6s, transform .6s; animation: introFade 1.2s .5s both; pointer-events: none; }
 .stage-module .hub-copy, .stage-note .hub-copy { opacity: 0; transform: translateY(-10px); }
-.stage-module .ecostream, .stage-note .ecostream { display: block; }
-/* —— 生态流水（左侧竖条）：无边框无底色，从水母列/水母环下方垂到屏幕底，越往下越虚无 —— */
+/* —— 生态流水（左侧竖条，全视图固定）：无边框无底色，左上文案下方垂到屏幕底，面板可滚、底部渐隐 —— */
 .ecostream { position: absolute; left: 44px; bottom: 0; width: 250px; z-index: 1; display: flex; flex-direction: column; animation: introFade 1s 2s both; pointer-events: none; }
 .intro-done .ecostream { animation-delay: 0s; animation-duration: .5s; }
 .ecostream h3 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 6px; font-size: 10.5px; letter-spacing: .14em; color: var(--text-2); font-weight: 600; }
 .ecostream h3 em { font-weight: 400; letter-spacing: .08em; }
 .ecostream h3 b { margin-left: auto; color: var(--text); font-weight: 500; letter-spacing: 0; }
-.eco-list { display: grid; gap: 1px; overflow: hidden; flex: 1; min-height: 0;
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 34%, rgba(0, 0, 0, .45) 72%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 0%, #000 34%, rgba(0, 0, 0, .45) 72%, transparent 100%); }
+.eco-list { display: grid; gap: 1px; overflow-y: auto; flex: 1 1 0; min-height: 0; scrollbar-width: thin; pointer-events: auto;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 30%, rgba(0, 0, 0, .45) 74%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 30%, rgba(0, 0, 0, .45) 74%, transparent 100%); }
 .eco-item { display: flex; align-items: baseline; gap: 6px; font-size: 10.5px; color: var(--text-2); line-height: 1.65; pointer-events: auto; }
 .eco-item i { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--ec); box-shadow: 0 0 6px var(--ec); align-self: center; }
 .eco-ts { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
