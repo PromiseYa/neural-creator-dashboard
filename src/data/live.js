@@ -56,15 +56,16 @@ export async function fetchEcosystem() {
 }
 
 // 任务写操作：直连 8330 /api/task（经 vite 代理；本机回环免口令）。
-// op 取值与面板一致：done 完成 / doing 进行中 / wait 待确认 / reopen 退回待办 / dispatch 派发。
-export async function taskAction({op, id}) {
+// op 取值与面板一致：done 完成 / doing 进行中 / wait 待确认 / reopen 退回待办 / dispatch 派发；
+// note 改备注（note 字段全量覆盖）/ due 调截止（due 字段，空串=清除）——额外字段原样透传。
+export async function taskAction({op, id, ...rest}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 6000);
   try {
     const r = await fetch('/panel/api/task', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({op, id}),
+      body: JSON.stringify({op, id, ...rest}),
       signal: ctl.signal
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);

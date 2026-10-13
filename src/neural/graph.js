@@ -8,6 +8,15 @@ export const PRIO_ZH = {high: '高', mid: '中', low: '低'};
 // 六状态徽章分色（与 8331 驾驶舱同口径）
 export const ST_COLOR = {pending: '#98a6a1', dispatched: '#a9d3e4', doing: '#7ddc9a', waiting_confirm: '#e8c48c', review: '#c0b8ef', done: '#8fa396'};
 
+// 任务状态快速切换表（8330 set_status 支持的五态；review 态只能由 AI 申报+验收产生，不进手动切换）
+export const TASK_OPS = [
+  ['待办', 'pending', 'reopen'],
+  ['已派', 'dispatched', 'dispatch'],
+  ['进行中', 'doing', 'doing'],
+  ['待确认', 'waiting_confirm', 'wait'],
+  ['完成', 'done', 'done']
+];
+
 // 卡片右侧状态徽章：任务/服务/拍板一眼看状态，记忆显示更新日期
 export function nodeBadge(n) {
   if (n.kind === 'task') { const s = n.task?.status; return {text: STATUS_ZH[s] || s || '—', color: ST_COLOR[s] || '#98a6a1'}; }
@@ -232,7 +241,10 @@ export function forceLayout(graph) {
   const anchor = id => {
     const n = idx.get(id);
     if (n.kind === 'concept') return [0, -1];
-    const f = FOLDERS.find(f => f.id === (n.folder?.startsWith('f:0') || n.level === 2 ? 'f:methods' : n.folder) || f.id === id);
+    // kb 分区子锚点(level 2)与 kb 笔记都归拢到知识库方向：形成右侧星云，
+    // 与任务/拍板/记忆/服务各自水母方向的星群同构（无锚点时随机散布，看不出模块归属）
+    const fid = n.level === 2 || String(n.folder || '').startsWith('f:kb') ? 'f:kb' : n.folder;
+    const f = FOLDERS.find(x => x.id === fid) || FOLDERS.find(x => x.id === id);
     return f ? [Math.cos(rad(f.angle)), Math.sin(rad(f.angle))] : null;
   };
   for (const n of N) {

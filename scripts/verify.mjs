@@ -93,7 +93,7 @@ console.log('核心动效（光球与水母）');
 const home = readFileSync(join(ROOT, 'src/neural/Home.jsx'), 'utf8');
 const graphSrc = readFileSync(join(ROOT, 'src/neural/graph.js'), 'utf8');
 const core = [
-  ['光球视频', /className="orb"[\s\S]{0,400}<video [^>]*src=\{T\.media\.orb\}/],
+  ['光球视频', /className="orb[^"]*"[\s\S]{0,400}<video [^>]*src=\{T\.media\.orb\}/],
   ['光球周围的光点', /orb-dust/],
   ['每个模块一只水母视频', /MODULES\.map\(m => \{[\s\S]{0,600}className=\{`jelly [\s\S]{0,600}<video [^>]*src=\{T\.media\.jelly\}/],
   ['视频逐帧画到画布显示（兼容不合成 <video> 的内置浏览器）', /function paintVideo\(pair\)[\s\S]*drawImage[\s\S]*for \(const pair of Object\.values\(vids\.current\)\) paintVideo\(pair\)/],

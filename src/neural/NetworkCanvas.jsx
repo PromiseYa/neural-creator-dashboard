@@ -29,7 +29,15 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         if (o && !depth.has(o)) { depth.set(o, depth.get(id) + 1); q.push(o); }
       }
     }
-    const nodes = graph.nodes.filter(n => n.kind !== 'core').map((n, i) => ({
+    // 节点过多时随机采样保上限（结构节点 folder/tag 全留，内容节点按稳定种子采样）——
+    // 星云保持密度感又不至于节点数千时糊成一片
+    const allNodes = graph.nodes.filter(n => n.kind !== 'core');
+    const CAP = 400;
+    const rnd = id => { let s = 0; for (const c of id) s = (s * 131 + c.charCodeAt(0)) >>> 0; return (s % 9973) / 9973; };
+    const nodes = (allNodes.length > CAP
+      ? allNodes.filter(n => n.kind === 'folder' || n.kind === 'tag' || rnd(n.id) < (CAP - allNodes.filter(x => x.kind === 'folder' || x.kind === 'tag').length) / allNodes.length)
+      : allNodes)
+      .map((n, i) => ({
       n, p: layout[n.id], d: depth.get(n.id) ?? 4, seed: (i * 9301 + 49297) % 233280 / 233280,
       r: n.kind === 'folder' ? 3.2 : n.kind === 'tag' ? 1.6 : n.kind === 'concept' ? 2.4 : n.kind === 'ghost' ? 2 : 2.2 + Math.min(n.deg, 14) * .22
     }));

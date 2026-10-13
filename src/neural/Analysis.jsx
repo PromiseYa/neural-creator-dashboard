@@ -143,16 +143,18 @@ const sharedConcepts = (a, b) => (a.shared || []).filter(x => (b.shared || []).i
 // 任务执行现场（与 8331 详情抽屉同源）：事件时间线 + 附件（图片缩略图点击灯箱放大，视频内嵌可播）。
 // 附件文件本体走 vite 代理 /hub/attach/<tid>/<文件>，只读。
 const VIDEO_EXT = ['.mp4', '.mov', '.webm', '.avi', '.mkv'];
-function TaskExtra({tid, detail}) {
-  const events = detail?.events || [];
-  const atts = detail?.attachments || [];
-  const [zoom, setZoom] = useState(null);
+const ATT_LOST = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="64"><rect fill="%2310151c" width="200" height="64" rx="8"/><text x="100" y="37" fill="%238b949e" font-size="11" text-anchor="middle">图片文件已不可用</text></svg>';
+function Lightbox({src, onClose}) {
   useEffect(() => {
-    if (!zoom) return;
-    const key = e => { if (e.key === 'Escape' && !e.isComposing) setZoom(null); };
+    const key = e => { if (e.key === 'Escape' && !e.isComposing) onClose(); };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [zoom]);
+  }, [onClose]);
+  return <div className="lightbox" onClick={onClose} role="dialog" aria-label="附件大图，点击或 Esc 关闭"><img src={src} alt=""/></div>;
+}
+function TaskExtra({tid, detail, onZoom}) {
+  const events = detail?.events || [];
+  const atts = detail?.attachments || [];
   if (!events.length && !atts.length) return null;
   return <section className="an-section">
     <h3><Icon name="pulse" size={14}/>执行现场 <em>Activity &amp; attachments</em></h3>
@@ -161,7 +163,9 @@ function TaskExtra({tid, detail}) {
         const url = `/hub/attach/${encodeURIComponent(tid)}/${encodeURIComponent(f)}`;
         return VIDEO_EXT.some(ext => f.toLowerCase().endsWith(ext))
           ? <video key={f} className="an-att-video" src={url} controls preload="metadata"/>
-          : <button key={f} className="an-att-img" onClick={() => setZoom(url)} aria-label={`放大查看 ${f}`}><img src={url} alt={f} loading="lazy"/></button>;
+          : <button key={f} className="an-att-img" onClick={() => onZoom(url)} aria-label={`放大查看 ${f}`}>
+              <img src={url} alt={f} loading="lazy" onError={e => { e.currentTarget.onerror = null; e.currentTarget.src = ATT_LOST; }}/>
+            </button>;
       })}
     </div>}
     {events.length > 0 && <div className="an-timeline">
@@ -174,8 +178,23 @@ function TaskExtra({tid, detail}) {
       ))}
       {events.length > 20 && <div className="tl-item"><span className="ts"/><span className="txt">…共 {events.length} 条，更早的看驾驶舱</span></div>}
     </div>}
-    {zoom && <div className="lightbox" onClick={() => setZoom(null)} role="dialog" aria-label="附件大图"><img src={zoom} alt=""/></div>}
   </section>;
+}
+
+// 任务内容正文：把"【图片解析 文件名】"引用就地渲染成内嵌图片（点击灯箱放大），其余按段落显示
+function TaskContent({tid, text, onZoom}) {
+  const src = String(text || '');
+  if (!src.trim()) return <p>（这条任务没有补充内容，标题即全部——可在下方补备注。）</p>;
+  const parts = src.split(/(【图片解析\s+[^\]】]+】)/g);
+  if (!parts.some(p => p.startsWith('【图片解析'))) return <p>{src}</p>;
+  return <div className="tc-body">{parts.map((seg, i) => {
+    const m = seg.match(/^【图片解析\s+([^\]】]+)】$/);
+    if (!m) return seg.trim() ? <p key={i}>{seg}</p> : null;
+    const url = `/hub/attach/${encodeURIComponent(tid)}/${encodeURIComponent(m[1].trim())}`;
+    return <button key={i} className="inline-att" onClick={() => onZoom(url)} title={`放大查看 ${m[1]}`}>
+      <img src={url} alt={m[1]} loading="lazy" onError={e => { e.currentTarget.onerror = null; e.currentTarget.src = ATT_LOST; }}/>
+    </button>;
+  })}</div>;
 }
 
 // 详情补充数据：任务走 8331 详情接口（任务全行+事件流+附件清单，经 vite 代理只读），
@@ -247,8 +266,8 @@ function analyze(graph, node, detail) {
         level: t.status === 'doing' ? ['进行', 'Doing', 'high'] : t.status === 'waiting_confirm' ? ['待确认', 'Confirm', 'mid'] : ['排队', 'Queued', 'low'],
         delta: `${same}/${T.length}`, deltaEn: 'tasks', bars: T.map(x => ({v: 1, on: x === node, label: x.short}))},
       tiles: [['works', T.length, '未结任务', 'Open'], ['pulse', t.due ? 1 : 0, '有截止', 'Due'], ['file', notes.replace(/\s/g, '').length, '内容字数', 'Notes'], ['link', d.both, '关联', 'Links']],
+      content: notes,               // 任务正文单独渲染：内嵌显示"【图片解析 xx.png】"引用的图片
       insights: [
-        ['任务内容', 'Content', notes || '（这条任务没有补充内容，标题即全部——可在驾驶舱补备注。）', 'info'],
         ['调度与溯源', 'Origin', `来源 ${SRC_ZH[t.source] || t.source || '—'}${full.source_ref ? ` · 关联 ${full.source_ref}` : ''} · 创建 ${t.created_at || '—'} · 更新 ${t.updated_at || '—'}`, 'muted'],
         ...extras
       ]
@@ -395,6 +414,8 @@ function analyze(graph, node, detail) {
 
 export function Analysis({graph, node, module, onGo, onAction, onClose}) {
   const detail = useDetail(node);
+  const [zoom, setZoom] = useState(null);
+  const [editing, setEditing] = useState(null);   // 任务编辑态：{note: '备注草稿'} / {due: 'YYYY-MM-DD'}（8330 note/due op）
   const a = useMemo(() => analyze(graph, node, detail), [graph, node, detail]);
   const color = KINDS[node.kind].color;
   return <div className="analysis glass" style={{'--kc': color}} role="region" aria-label={`${node.title} 的分析`}>
@@ -438,12 +459,34 @@ export function Analysis({graph, node, module, onGo, onAction, onClose}) {
       <Metric {...a.metric}/>
       <Tiles tiles={a.tiles}/>
       {a.all && <section className="an-section"><h3>全部指标 <em>All metrics</em></h3><div className="an-all">{a.all.map(([zh, en, v]) => <div key={zh}><span>{zh}<em>{en}</em></span><b>{v}</b></div>)}</div></section>}
+      {a.content != null && <section className="an-section"><h3>任务内容 <em>Content</em></h3><TaskContent tid={node.task?.id} text={a.content} onZoom={setZoom}/></section>}
+      {node.kind === 'task' && detail?.ok && <section className="an-section">
+        <h3>编辑 <em>Edit</em></h3>
+        <div className="task-edit">
+          {editing?.note !== undefined ? <>
+            <textarea value={editing.note} rows={4} placeholder="补充说明/处理结果写这里…" onChange={e => setEditing({note: e.target.value})} aria-label="编辑备注"/>
+            <div className="te-actions">
+              <button className="primary" onClick={() => { onAction({type: 'taskOp', id: node.task?.id, op: 'note', note: editing.note}); setEditing(null); }}>保存备注 <em>Save</em></button>
+              <button onClick={() => setEditing(null)}>取消</button>
+            </div>
+          </> : <button className="ghost te-btn" onClick={() => setEditing({note: detail?.task?.notes || ''})}>✎ 改备注 <em>Note</em></button>}
+          {editing?.due !== undefined ? <>
+            <input type="date" value={editing.due} onChange={e => setEditing({due: e.target.value})} aria-label="选择截止日期"/>
+            <div className="te-actions">
+              <button className="primary" onClick={() => { onAction({type: 'taskOp', id: node.task?.id, op: 'due', due: editing.due || ''}); setEditing(null); }}>保存截止 <em>Save</em></button>
+              <button onClick={() => { onAction({type: 'taskOp', id: node.task?.id, op: 'due', due: ''}); setEditing(null); }}>清除</button>
+              <button onClick={() => setEditing(null)}>取消</button>
+            </div>
+          </> : <button className="ghost te-btn" onClick={() => setEditing({due: (detail?.task?.due || '').slice(0, 10)})}>◷ 调截止 <em>Due</em>{detail?.task?.due ? ` · ${String(detail.task.due).slice(0, 10)}` : ''}</button>}
+        </div>
+      </section>}
       <Insights items={a.insights}/>
-      {node.kind === 'task' && detail?.ok && <TaskExtra tid={node.task?.id} detail={detail}/>}
+      {node.kind === 'task' && detail?.ok && <TaskExtra tid={node.task?.id} detail={detail} onZoom={setZoom}/>}
       {node.kind === 'note' && <RelatedSearch node={node}/>}
       {node.tags?.length > 0 && <section className="an-section"><h3>话题标签 <em>Topics</em></h3><div className="chip-row">{node.tags.map(t => <span key={t} className="chip static" style={{'--kc': KINDS.tag.color}}>#{t}</span>)}</div></section>}
       <Links graph={graph} node={node} onGo={onGo}/>
     </div>
     <AskBox graph={graph} node={node} onGo={onGo}/>
+    {zoom && <Lightbox src={zoom} onClose={() => setZoom(null)}/>}
   </div>;
 }

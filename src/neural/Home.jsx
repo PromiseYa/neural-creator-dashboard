@@ -1,5 +1,5 @@
 import React, {useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback} from 'react';
-import {MODULES, KINDS, stats, askGraph, moduleOf, STATUS_ZH, PRIO_ZH, nodeBadge} from './graph';
+import {MODULES, KINDS, stats, askGraph, moduleOf, STATUS_ZH, PRIO_ZH, nodeBadge, TASK_OPS, ST_COLOR} from './graph';
 import {Icon} from './icons';
 import {NetworkCanvas} from './NetworkCanvas';
 import {Analysis} from './Analysis';
@@ -13,10 +13,10 @@ export const MOD_STYLE = Object.fromEntries(Object.entries(T.modules).map(([id, 
 export const split = n => ({out: n.out - n.mutual, back: n.in - n.mutual, both: n.mutual});
 const fmt = v => v == null ? '—' : Number(v).toLocaleString('zh-CN');
 
-// 生态流水（hub 视图左下）：工作站最近事件按时间排布，30 秒轮询自动更新；
-// 比上一轮更大的事件号视为"新到"，金色高亮几秒后回归。与任务/拍板/服务色系一致的小圆点着色。
+// 生态流水（左侧竖条）：从水母列/水母环下方一点垂到屏幕底部，越往下越虚无（mask 渐隐）；
+// 无边框无底色，行样式参考右上图例（小圆点+文字）；30 秒轮询，新到事件金色高亮。
 const ACT_COLOR = {dispatch: '#a9d3e4', task: '#c3bcf2', decide: '#e8c48c', decision: '#e8c48c', alarm: '#ff7385', cmd: '#7ddc9a', event: '#98a6a1'};
-function EcoStream({events}) {
+function EcoStream({events, top}) {
   const [freshIds, setFreshIds] = useState(() => new Set());
   const seenMax = useRef(null);
   useEffect(() => {
@@ -32,8 +32,8 @@ function EcoStream({events}) {
     }
   }, [events]);
   if (!events.length) return null;
-  return <div className="ecostream glass" aria-label="生态流水">
-    <h3><Icon name="pulse" size={13}/>生态流水 <em>Stream</em><b>{events.length} 条</b></h3>
+  return <div className="ecostream" style={{top}} aria-label="生态流水">
+    <h3>生态流水 <em>Stream</em><b>{events.length}</b></h3>
     <div className="eco-list">
       {events.slice(0, 14).map(e => (
         <div key={e.id ?? (e.ts + (e.detail || ''))} className={`eco-item${freshIds.has(e.id) ? ' fresh' : ''}`}>
@@ -181,7 +181,7 @@ export function targets(L, t) {
     // 打开笔记时：整个构图（光球+水母列+祖先列+文件列）作为同一刚体向左平移+整体缩小给详情页让位——
     // 结构原样、无人消失、无重排，ESC 原样放大还原。
     const zchain = L.zonePath || [];
-    const zdRaw = L.mod === 'kb' && zchain.length > 1 ? zchain.length - 1 : 0;
+    const zdRaw = zchain.length > 1 ? zchain.length - 1 : 0;   // kb 与 services 都走层级链（zonePath 只有这两个模块有值）
     const zd = Math.min(zdRaw, 2);
     const SX = [fanBase, fanBase + 200, fanBase + 400];
     const fit = !zd || SX[zd] + 270 <= W - 24;
@@ -268,7 +268,7 @@ function paintVideo(pair) {
 
 const bez = (p0, p1, p2, p3, u) => { const m = 1 - u; return m * m * m * p0 + 3 * m * m * u * p1 + 3 * m * u * u * p2 + u * u * u * p3; };
 
-function Scene({graph, items, onModule, onItem, live, sel, zonePath, ancLevels, zone}) {
+function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zonePath, ancLevels, zone}) {
   const dustRef = useRef(null);
   const orbRef = useRef(null), jellyRefs = useRef({}), innerRefs = useRef({}), labelRefs = useRef({}), threadRefs = useRef({}), pulseRefs = useRef({}), sceneRef = useRef(null);
   const itemRefs = useRef([]), fanRefs = useRef([]), fanPulseRefs = useRef([]);
@@ -466,7 +466,8 @@ function Scene({graph, items, onModule, onItem, live, sel, zonePath, ancLevels, 
   // 静态兜底位置：渲染帧（rAF）冻结时（如窗口被遮挡）各元素也按最终布局可见可点，正常时 rAF 接管动画
   const t0 = targets(live.current, 0);
   return <div className={`scene stage-${live.current.stage}`} ref={sceneRef}>
-    <div className="orb" ref={orbRef} aria-hidden="true">
+    <div className="orb clickable" ref={orbRef} role="button" tabIndex={-1} aria-label="回到星图主页" title="回到星图主页"
+      onClick={() => onHome()} onPointerEnter={() => { live.current.hover = 'core'; }} onPointerLeave={() => { live.current.hover = null; }}>
       <div className="orb-halo"/>
       <video className="vsrc" ref={vidRef('orb', 'video')} src={T.media.orb} poster={T.media.orbPoster} muted loop playsInline autoPlay preload="auto"/>
       <canvas className="vid" ref={vidRef('orb', 'canvas')}/>
@@ -534,7 +535,23 @@ function Scene({graph, items, onModule, onItem, live, sel, zonePath, ancLevels, 
           <span className="fi-title">{n.short || n.title}</span>
           <span className="fi-meta">{meta.map(([k, en, v], j) => <span key={j} className={k === '↔' ? 'mutual' : ''}>{k}{en && <em>{en}</em>} {v !== '' && <b>{v}</b>}</span>)}</span>
         </span>
-        {bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}
+        {n.kind === 'task' && bd ? (
+          // 状态徽章悬停扇形展开可切换状态（卡片本身是 button，内部用 span role=button 避免 button 嵌套）
+          <span className="st-swap" onClick={e => e.stopPropagation()}>
+            <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>
+            <span className="st-fan" aria-label="切换任务状态">
+              {TASK_OPS.map(([zh, target, op], k) => {
+                const cur = n.task?.status === target;
+                return <span key={target} role="button" tabIndex={cur ? -1 : 0} aria-disabled={cur}
+                  className={`st-opt${cur ? ' cur' : ''}`} style={{'--b': ST_COLOR[target], '--i': k}}
+                  onClick={ev => { ev.stopPropagation(); if (!cur) onAction({type: 'taskOp', id: n.task?.id, op}); }}
+                  onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); if (!cur) onAction({type: 'taskOp', id: n.task?.id, op}); } }}>
+                  {cur ? '✓ ' : ''}{zh}
+                </span>;
+              })}
+            </span>
+          </span>
+        ) : bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}
       </button>;
     })}
   </div>;
@@ -594,7 +611,16 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   // 层级卡链：按 zone 的真实目录层级逐级展开（任意深度），每张卡篇数 = 该层子树全部笔记数；
   // 旧层缩小靠上保留（完整层名+篇数），点击直接回退到该层
   const zoneChain = useMemo(() => {
-    if (mod !== 'kb' || !zone) return null;
+    if ((mod !== 'kb' && mod !== 'services') || !zone) return null;
+    if (mod === 'services') {
+      // 服务舱两级链：服务舱 → 分类（核心服务/常驻工作者），计数=服务本体（含离线）
+      const S = graph.nodes.filter(x => x.kind === 'service');
+      const grp = zone === '核心服务' ? 'core' : 'worker';
+      return [
+        {name: '服务舱', zone: null, n: S.length},
+        {name: zone, zone, n: S.filter(x => x.service?.group === grp).length}
+      ];
+    }
     const parts = zone.split('/');
     const zoneNotes = graph.nodes.filter(x => x.kind === 'note' && x.folder === 'f:kb:' + parts[0]);
     const chain = [
@@ -615,9 +641,9 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   // 祖先列清单：钻取路径上每一层的内容（k=0=分区卡列，…），与当前列一起层层递进；
   // 每列的"钻入卡"= 下一层的 zone（高亮 + 喂养下一列触须）
   const ancLevels = useMemo(() => {
-    if (mod !== 'kb' || !zoneChain) return [];
+    if ((mod !== 'kb' && mod !== 'services') || !zoneChain) return [];
     const out = [];
-    for (let k = 0; k < zoneChain.length - 1; k++) out.push(moduleItems(graph, 'kb', zoneChain[k].zone));
+    for (let k = 0; k < zoneChain.length - 1; k++) out.push(moduleItems(graph, mod, zoneChain[k].zone));
     return out;
   }, [graph, mod, zoneChain]);
   const live = useRef(null);
@@ -753,7 +779,9 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   return <section ref={stageRef} className={`home-stage stage-${stage} ${live.current.introSeen ? 'intro-done' : ''}`} aria-label="创作神经图谱">
     <div className="stage-bg"/>
     <NetworkCanvas graph={graph} layout={layout} live={live} reduced={reduced}/>
-    <Scene graph={graph} items={stage === 'hub' ? [] : items} sel={sel} live={live} zonePath={zonePath} ancLevels={ancLevels} zone={zone} onModule={id => setFocus({mod: id === mod && stage !== 'hub' ? mod : id, zone: null, sel: null})} onItem={n => {
+    <Scene graph={graph} items={stage === 'hub' ? [] : items} sel={sel} live={live} zonePath={zonePath} ancLevels={ancLevels} zone={zone}
+      onAction={onAction} onHome={() => setFocus({mod: null, sel: null})}
+      onModule={id => setFocus({mod: id === mod && stage !== 'hub' ? mod : id, zone: null, sel: null})} onItem={n => {
       if (n.kind === 'folder' && (mod === 'kb' || mod === 'services')) {   // 分区/子目录/服务分类卡：按卡上的完整路径往里钻一层
         setFocus({mod, zone: n.path, sel: null});
       } else if (n.kind !== 'ghost') {
@@ -796,14 +824,17 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
       <div className="legend-lines"><span><i className="ln mutual"/>双向 <em>Mutual</em></span><span><i className="ln one"/>单向 <em>One-way</em></span></div>
     </div>}
     {stage === 'hub' && <Dock graph={graph} onGo={go}/>}
-    {stage === 'hub' && <EcoStream events={ecoEvents}/>}
+    {/* 流水起点：贴着水母环/水母列底部往下一点（矮屏露出几条+渐隐，大屏完整垂到底） */}
+    <EcoStream events={ecoEvents} top={stage === 'hub'
+      ? Math.round(size.h * .53 + Math.min(size.h * .32, 262) + 48)
+      : Math.round(size.h * .53 + 2 * Math.min(122, (size.h - 150) / 5) + 66)}/>
     {/* 宽屏 kb 钻取时层级轨迹已由画布上的横排胶囊承担，这里只在窄屏显示，避免两套面包屑重复 */}
     {zoneChain && stage === 'module' && size.w < 760 && <div className="zone-trail" aria-label="层级轨迹">
       {zoneChain.map((c, i) => (
         <React.Fragment key={c.zone || 'root'}>
           {i > 0 && <span className="zt-arrow">›</span>}
           <button className={`zt-card${i === zoneChain.length - 1 ? ' cur' : ''}`}
-            onClick={() => setFocus({mod: 'kb', zone: c.zone, sel: null})}>
+            onClick={() => setFocus({mod, zone: c.zone, sel: null})}>
             <b>{c.name}</b><em>{c.n} 篇</em>
           </button>
         </React.Fragment>
