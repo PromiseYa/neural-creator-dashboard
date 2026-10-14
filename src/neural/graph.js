@@ -253,7 +253,7 @@ export function forceLayout(graph) {
       const zone = f === 'f:kb' ? id : f;   // 笔记→所在分区；分区锚点→自身
       let h = 0; for (const c of String(zone)) h = (h * 131 + c.charCodeAt(0)) % 9973;
       const ang = base + (h / 9973 - .5) * 160 * Math.PI / 180;   // 宽扇面 ±80°（旧 ±58° 太窄=团挤一处）
-      return [Math.cos(ang), Math.sin(ang), 250 + h % 9973 / 9973 * 170];   // 第三位=各自分区团的远近（250~420 错开层次）；Obsidian 式散落四周而非全贴水母
+      return [Math.cos(ang), Math.sin(ang), 170 + h % 9973 / 9973 * 250];   // 第三位=各自分区团的远近（170~420）：近端进光晕带（用户令"光晕四周要有二层星光散落"），远端铺到外围
     }
     const fd = FOLDERS.find(x => x.id === f) || FOLDERS.find(x => x.id === id);
     return fd ? [Math.cos(rad(fd.angle)), Math.sin(rad(fd.angle))] : null;

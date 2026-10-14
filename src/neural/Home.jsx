@@ -258,12 +258,16 @@ export function targets(L, t) {
     const js = MODULES.map((m, i) => {
       const rm = RM[m.id] || (RM[m.id] = {x: 0, y: 0, vx: 4, vy: 0, ang: Math.random() * 6.28, spd: 6, turnAt: 0, targetAng: 0, targetSpd: 7, hitAt: 0});
       if (swim) {
-        // 光标吸引=真追逐：感应半径 190px（旧 300 太远、很远就跑过来）；速度自适应上限 42（慢拖仍咬得住，
-        // 仿真 96.7% 跟随）；转弯/加速整体放缓=从容丝滑；前置预测 .8（转弯慢了更要提前预判折返）
+        // 光标吸引=真追逐：感应半径 190px；速度自适应上限 42（慢拖咬得住）；转弯/加速放缓=从容丝滑；
+        // 近距离（<60px）不再更新追逐角——atan2 在原点附近病态，光标压在水母身上时角度高频翻转=原地甩头
         let chase = false;
         if (L.smx != null) {
           const cdx = L.smx - (base[i].x + rm.x), cdy = L.smy - (base[i].y + rm.y), cd = Math.hypot(cdx, cdy);
-          if (cd < 190 && cd > 4) { chase = true; rm.targetAng = Math.atan2(cdy + (L.smvy || 0) * .8, cdx + (L.smvx || 0) * .8); rm.targetSpd = clamp(5 + cd * .07 + Math.hypot(L.smvx || 0, L.smvy || 0) * 1.15, 7, 42); rm.turnAt = t + .5; }
+          if (cd < 190 && cd > 4) {
+            chase = true;
+            if (cd > 60) { rm.targetAng = Math.atan2(cdy + (L.smvy || 0) * .8, cdx + (L.smvx || 0) * .8); rm.turnAt = t + .5; }
+            rm.targetSpd = clamp(5 + cd * .07 + Math.hypot(L.smvx || 0, L.smvy || 0) * 1.15, 7, 42);
+          }
         }
         if (!chase && t >= rm.turnAt) { rm.turnAt = t + 3.5 + Math.random() * 5.5; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 4 + Math.random() * 9; }   // 随机掉头
         let da = rm.targetAng - rm.ang; da = Math.atan2(Math.sin(da), Math.cos(da));
@@ -332,6 +336,10 @@ export function targets(L, t) {
       const jj = {x: bx + rm.x, y: by + rm.y + swim * 5 * Math.sin(t * .8 + i * 2.1), s: jsz, o: 1,
         tilt: clamp(rm.vx * 1.15, -14, 14) + swim * 2 * Math.sin(t * .6 + i),   // 倾倒由真实速度驱动但放缓（丝滑优先）
         spd: Math.hypot(rm.vx, rm.vy), vy: rm.vy, hit: rm.hitAt || 0};   // 供水母伞体脉动/俯仰渲染
+      // 倾倒惯性平滑（时间常数 ~0.5s）：速度瞬时值直接驱动倾倒会让水母"游多久偏多久"+转向时猛甩——
+      // 低通后慢慢倾、慢慢回正，像有身体质量的水母而非指针
+      rm.tiltS = (rm.tiltS || 0) + (jj.tilt - (rm.tiltS || 0)) * Math.min(1, dt * 2);
+      jj.tilt = rm.tiltS;
       // 近距强吸：110px 内黑洞拉力贴住光标；u^2.2 边缘平缓中心才强（旧 150px u^1.6 陡得突兀）
       if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 110 && d > 2) { const u = 1 - d / 110; const f = Math.pow(u, 2.2) * 96; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .25; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .4, -18, 18); } }
       jj.tilt = clamp(jj.tilt, -26, 26);

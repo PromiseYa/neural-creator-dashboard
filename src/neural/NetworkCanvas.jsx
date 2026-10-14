@@ -3,6 +3,8 @@ import {KINDS} from './graph';
 import {T} from './theme';
 import {glowSprite, orbSprite} from './sprites';
 
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
 const P = T.canvas;
 const ADD = P.additive ? 'lighter' : 'source-over';
 
@@ -112,13 +114,19 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         ctx.globalCompositeOperation = 'source-over';
       }
 
-      // 连线
+      // 连线（hub 时按线中点与光球的距离衰减：光晕范围内线隐为零——星云线穿过白色光晕会
+      // 出现"进入消失/出来复现"的断口切面，用户看到的"主神经白背景切面"即此）
+      const haloFade = (x1, y1, x2, y2) => {
+        if (L.stage !== 'hub') return 1;
+        const md = Math.hypot((x1 + x2) / 2 - cx, (y1 + y2) / 2 - cy);
+        return clamp((md - L.orb.s * .55) / (L.orb.s * .45), .06, 1);
+      };
       for (const k of links) {
         const [x1, y1, p1] = k.A.s, [x2, y2, p2] = k.B.s;
         const p = Math.min(p1, p2) * grow;
         if (p <= .02) continue;
         const on = !hl || (hl.has(k.l.a) && hl.has(k.l.b));
-        let a = (k.l.both ? .32 : k.l.kind === 'wiki' ? .3 : k.l.kind === 'contain' ? .16 : .11) * p * (on ? 1 : .18) * (hl && on ? 2.6 : 1);
+        let a = (k.l.both ? .32 : k.l.kind === 'wiki' ? .3 : k.l.kind === 'contain' ? .16 : .11) * p * (on ? 1 : .18) * (hl && on ? 2.6 : 1) * haloFade(x1, y1, x2, y2);
         ctx.strokeStyle = k.l.both ? `rgba(${P.mutual},${a})` : k.l.kind === 'wiki' ? `rgba(${P.wiki},${a})` : `rgba(${P.link},${a})`;
         ctx.lineWidth = k.l.both ? .6 + Math.min(k.l.w, 6) * .22 : .7;
         ctx.beginPath(); ctx.moveTo(x1, y1);
@@ -134,7 +142,7 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         if (p <= .02) continue;
         const on = !hl || hl.has(k.A.n.id) || hl.has(k.B.n.id);
         const breath = reduced || L.paused ? 1 : .68 + .32 * Math.sin(t * .45 + (k.A.seed + k.B.seed) * 3.1);
-        ctx.strokeStyle = `rgba(${P.link},${(.13 * (on ? 1.5 : 1) * p * breath).toFixed(3)})`;
+        ctx.strokeStyle = `rgba(${P.link},${(.13 * (on ? 1.5 : 1) * p * breath * haloFade(x1, y1, x2, y2)).toFixed(3)})`;
         ctx.lineWidth = .6;
         ctx.beginPath(); ctx.moveTo(x1, y1);
         ctx.quadraticCurveTo((x1 + x2) / 2, (y1 + y2) / 2 + 7, x2, y2);
