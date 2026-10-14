@@ -660,7 +660,10 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
     }))}
     {items.map((n, i) => {
       const meta = itemMeta(n), fp = t0.fan, bd = nodeBadge(n);
-      return <button key={n.id} className={`fan-item ${sel === n.id ? 'active' : ''} kind-${n.kind}`} ref={el => { itemRefs.current[i] = el; }} onClick={() => onItem(n)} style={{'--kc': KINDS[n.kind].color, transform: `translate3d(${fp.x}px,${fp.y0 + i * fp.gap - 15}px,0) scale(${fp.scale || 1})`, transformOrigin: 'top left'}} aria-label={`打开 ${n.title} 的分析`}>
+      // folder 性质的卡（分区/分类/子目录/时间窗）当前列也定宽 160——与祖先列同宽：
+      // 卡宽跨层恒定（钻取前后不跳变），列距 240=160 卡+80 线的节奏对所有模块成立
+      // （自适应宽时任务流卡仅 ~100px、服务舱 ~209px，线后空隙 40~140px 忽长忽短）
+      return <button key={n.id} className={`fan-item ${n.kind === 'folder' ? 'mini ' : ''}${sel === n.id ? 'active' : ''} kind-${n.kind}`} ref={el => { itemRefs.current[i] = el; }} onClick={() => onItem(n)} style={{'--kc': KINDS[n.kind].color, transform: `translate3d(${fp.x}px,${fp.y0 + i * fp.gap - 15}px,0) scale(${fp.scale || 1})`, transformOrigin: 'top left'}} aria-label={`打开 ${n.title} 的分析`}>
         <span className="fi-dot"/>
         <span className="fi-body">
           <span className="fi-title">{n.short || n.title}</span>

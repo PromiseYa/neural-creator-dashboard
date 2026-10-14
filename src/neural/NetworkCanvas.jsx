@@ -44,6 +44,18 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
     const byId = new Map(nodes.map(x => [x.n.id, x]));
     // 骨架化渲染：目录归属线（contain）只在布局里起作用，画布上不画——背景只留双链/话题脉络。
     const links = graph.links.filter(l => l.kind !== 'contain' && byId.has(l.a) && byId.has(l.b)).map((l, i) => ({l, A: byId.get(l.a), B: byId.get(l.b), seed: (i * 7919 % 997) / 997}));
+    // 深层记忆链：每个目录锚点挑连接度最高的几个内容节点，平时淡画一条归属线——
+    // 锚点背后还有"更深一层记忆体"的暗示（第二层信息光点），若隐若现不抢水母
+    const byFolder = new Map();
+    for (const l of graph.links) if (l.kind === 'contain' && byId.has(l.a) && byId.has(l.b)) {
+      if (!byFolder.has(l.a)) byFolder.set(l.a, []);
+      byFolder.get(l.a).push(l);
+    }
+    const deepLinks = [], deepNodes = new Set();
+    for (const ls of byFolder.values()) {
+      ls.sort((a, b) => (byId.get(b.b).n.deg || 0) - (byId.get(a.b).n.deg || 0));
+      for (const l of ls.slice(0, 5)) { deepLinks.push({A: byId.get(l.a), B: byId.get(l.b)}); deepNodes.add(l.b); }
+    }
     const sparks = Array.from({length: 90}, (_, i) => ({a: i / 90 * Math.PI * 2 + Math.sin(i * 12.9) * .3, v: .35 + (i * 37 % 100) / 100, s: 1 + (i * 13 % 7) / 3}));
 
     // 标签收纳：默认只画目录锚点名；hover 某类时只补该类连接度前 16 的节点名，明细一律进水母面板看。
@@ -115,6 +127,20 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         ctx.stroke();
       }
 
+      // 深层记忆链（第二层信息光点）：慢呼吸的极淡归属线，神经末梢伸进记忆体
+      for (const k of deepLinks) {
+        const [x1, y1, p1] = k.A.s, [x2, y2, p2] = k.B.s;
+        const p = Math.min(p1, p2) * grow;
+        if (p <= .02) continue;
+        const on = !hl || hl.has(k.A.n.id) || hl.has(k.B.n.id);
+        const breath = reduced || L.paused ? 1 : .68 + .32 * Math.sin(t * .45 + (k.A.seed + k.B.seed) * 3.1);
+        ctx.strokeStyle = `rgba(${P.link},${(.13 * (on ? 1.5 : 1) * p * breath).toFixed(3)})`;
+        ctx.lineWidth = .6;
+        ctx.beginPath(); ctx.moveTo(x1, y1);
+        ctx.quadraticCurveTo((x1 + x2) / 2, (y1 + y2) / 2 + 7, x2, y2);
+        ctx.stroke();
+      }
+
       // 神经脉冲：单向连接只朝出链方向，双向连接往返传递。
       if (!reduced && !L.paused && grow > .6) {
         ctx.globalCompositeOperation = ADD;
@@ -145,7 +171,8 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         const color = KINDS[x.n.kind].color;
         const a = p * (on ? 1 : .15);
         const r = x.r * (hl && on ? 1.45 : 1);
-        ctx.globalAlpha = a * .4; // 与原 P.glow（'#..66' ≈ 0.4）等效
+        const deep = deepNodes.has(x.n.id);
+        ctx.globalAlpha = a * (deep ? .5 + (reduced || L.paused ? 0 : .16 * Math.sin(t * .6 + x.seed * 6.28)) : .4); // 第二层记忆点自带微呼吸光晕
         ctx.globalCompositeOperation = ADD;
         const GR = r * 5;
         ctx.drawImage(glowSprite(color), px - GR, py - GR, GR * 2, GR * 2);
