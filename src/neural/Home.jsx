@@ -432,7 +432,7 @@ const DUST = Array.from({length: 110}, (_, i) => ({a: i * 2.39996, v: .035 + (i 
 const posterCache = new Map();
 const posterOf = url => { if (!posterCache.has(url)) { const img = new Image(); img.src = url; posterCache.set(url, img); } return posterCache.get(url); };
 function paintVideo(pair) {
-  const {video, canvas, filter} = pair;
+  const {video, canvas} = pair;
   if (!video || !canvas) return;
   const cw = canvas.clientWidth, ch = canvas.clientHeight;
   if (!cw || !ch) return;
@@ -446,10 +446,9 @@ function paintVideo(pair) {
   const stamp = ready ? video.currentTime : -1;
   if (!resized && stamp === pair.stamp && ready === pair.ready) return;
   pair.stamp = stamp; pair.ready = ready;
-  // 等同 object-fit: cover
+  // 等同 object-fit: cover（染色走 .jelly-inner 的 CSS filter=GPU 合成层；ctx.filter 每帧绘制实测拖垮帧率，已回退）
   const k = Math.max(W / sw0, H / sh0), sw = W / k, sh = H / k;
   const ctx = canvas.getContext('2d');
-  if (pair.appliedFilter !== filter) { ctx.filter = filter || 'none'; pair.appliedFilter = filter; }   // 染色在绘制时套用：省掉 5 个常驻 GPU 滤镜合成层（颜色实现与 CSS filter 相同）
   ctx.clearRect(0, 0, W, H);
   ctx.drawImage(src, (sw0 - sw) / 2, (sh0 - sh) / 2, sw, sh, 0, 0, W, H);
 }
@@ -463,7 +462,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   const itemRefs = useRef([]), fanRefs = useRef([]), fanPulseRefs = useRef([]);
   const aItemRefs = useRef([]), aThreadRefs = useRef([]), aThreadPulseRefs = useRef([]);
   const vids = useRef({});
-  const vidRef = (id, part, filter) => el => { const p = (vids.current[id] ||= {}); p[part] = el; if (filter) p.filter = filter; };
+  const vidRef = (id, part) => el => { (vids.current[id] ||= {})[part] = el; };
   const summaries = useMemo(() => Object.fromEntries(MODULES.map(m => [m.id, moduleSummary(graph, m)])), [graph]);
 
   useLayoutEffect(() => { live.current.fanStart = performance.now(); }, [items, live]);
@@ -791,10 +790,10 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }}
           style={{'--mod': MOD_STYLE[m.id].color}}
           aria-label={`${m.title} ${m.en}，${sum.count} 条`}>
-          <div className="jelly-inner" ref={el => { innerRefs.current[m.id] = el; }}>
-            <video className="vsrc" ref={vidRef(m.id, 'video', MOD_STYLE[m.id].filter)} src={T.media.jelly} poster={T.media.jellyPoster} muted loop playsInline autoPlay preload="auto"
+          <div className="jelly-inner" ref={el => { innerRefs.current[m.id] = el; }} style={{filter: MOD_STYLE[m.id].filter}}>
+            <video className="vsrc" ref={vidRef(m.id, 'video')} src={T.media.jelly} poster={T.media.jellyPoster} muted loop playsInline autoPlay preload="auto"
               onLoadedMetadata={e => { e.currentTarget.currentTime = (MODULES.indexOf(m) * 1.37) % 6; }}/>
-            <canvas className="vid" ref={vidRef(m.id, 'canvas', MOD_STYLE[m.id].filter)}/>
+            <canvas className="vid" ref={vidRef(m.id, 'canvas')}/>
           </div>
         </button>
         <button className={`jelly-label ${active ? 'active' : ''} ${hub || live.current.size.w >= 760 ? 'below' : 'side'}`} ref={el => { labelRefs.current[m.id] = el; }} onClick={() => onModule(m.id)} tabIndex={-1}
