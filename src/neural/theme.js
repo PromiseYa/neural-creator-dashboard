@@ -2,15 +2,15 @@
 import {asset} from '../config';
 
 export const T = {
-  kinds: {core: '#ecd9a6', folder: '#d9b6c1', post: '#c0b8ef', note: '#8fe0c0', idea: '#e8c48c', draft: '#a9d3e4', concept: '#e4e6e8', tag: '#98a6a1', ghost: '#70746f', task: '#b9b0f5', decision: '#f0c27a', memory: '#9cc8ee', service: '#dfe4ea'},
+  kinds: {core: '#ecd9a6', folder: '#d9b6c1', post: '#c0b8ef', note: '#8fe0c0', idea: '#e8c48c', draft: '#a9d3e4', concept: '#e4e6e8', tag: '#98a6a1', ghost: '#70746f', task: '#b9b0f5', decision: '#f0c27a', memory: '#9cc8ee', service: '#f2a0ad'},
   modules: {
-    // 每只水母独立染色（同一视频源用 hue/saturate/brightness 拉开）：紫罗兰/青绿/金橙/天蓝/银白；
-    // 触须与卡片连线用同款 color，整组色系一致
+    // 每只水母独立染色（同一视频源用 hue/saturate/brightness 拉开）：紫罗兰/青绿/金橙/天蓝/玫瑰粉；
+    // 触须与卡片连线用同款 color，整组色系一致（服务舱银白与文字白撞色，换玫瑰粉拉开）
     tasks: {color: '#b9b0f5', filter: 'hue-rotate(215deg) saturate(2.4) brightness(.92)'},
     kb: {color: '#8fe0c0', filter: 'hue-rotate(130deg) saturate(2.2) brightness(.9)'},
     decisions: {color: '#f0c27a', filter: 'hue-rotate(-6deg) saturate(2.6) brightness(.98)'},
     memory: {color: '#9cc8ee', filter: 'hue-rotate(165deg) saturate(2.3) brightness(.92)'},
-    services: {color: '#e4e7ea', filter: 'hue-rotate(185deg) saturate(1.15) brightness(1.12)'}
+    services: {color: '#f2a0ad', filter: 'hue-rotate(-48deg) saturate(2.6) brightness(.98)'}
   },
   // palindrome 剪辑（正放+倒放拼接）：循环回到首帧时画面连续，消除播完一帧的跳变；原片保留作回退
   media: {orb: asset('media/orb_pal.mp4'), orbPoster: asset('media/orb.jpg'), jelly: asset('media/jellyfish_pal.mp4'), jellyPoster: asset('media/jellyfish.jpg')},
