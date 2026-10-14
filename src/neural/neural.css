@@ -150,13 +150,11 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 30%, rgba(0, 0, 0, .45) 74%, transparent 100%);
   mask-image: linear-gradient(to bottom, #000 0%, #000 30%, rgba(0, 0, 0, .45) 74%, transparent 100%); }
 .eco-list::-webkit-scrollbar { display: none; width: 0; }   /* 静默滚动：不出滚动条 */
-.eco-item { display: flex; align-items: baseline; gap: 6px; font-size: 10.5px; color: var(--text-2); line-height: 1.65; pointer-events: auto; }
-.eco-item i { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--ec); box-shadow: 0 0 6px var(--ec); align-self: center; }
+.eco-item { display: flex; align-items: baseline; gap: 6px; font-size: 10.5px; color: var(--text-2); line-height: 1.55; pointer-events: auto; padding: 1.5px 0; }
+.eco-item i { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--ec); box-shadow: 0 0 6px var(--ec); margin-bottom: 1px; }
 .eco-ts { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
-/* 单行文字尽量完整显示，放不下的尾部向右模糊虚化隐去（不再省略号硬截断） */
-.eco-txt { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip;
-  -webkit-mask-image: linear-gradient(90deg, #000 88%, rgba(0, 0, 0, .3) 97%, transparent 100%);
-  mask-image: linear-gradient(90deg, #000 88%, rgba(0, 0, 0, .3) 97%, transparent 100%); }
+/* 多行完整显示：最多3行，第3行尾部省略；悬停 title 可看全文，整列底部依旧渐隐 */
+.eco-txt { min-width: 0; white-space: normal; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .eco-item.fresh .eco-txt { color: #e6cf98; text-shadow: 0 0 10px rgba(230, 207, 152, .45); }
 .eco-item.fresh i { animation: ecoPulse 1.6s ease-in-out infinite; }
 @keyframes ecoPulse { 50% { transform: scale(1.7); } }

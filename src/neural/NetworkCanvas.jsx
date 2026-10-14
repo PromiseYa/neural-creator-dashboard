@@ -29,15 +29,13 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         if (o && !depth.has(o)) { depth.set(o, depth.get(id) + 1); q.push(o); }
       }
     }
-    // 节点过多时随机采样保上限：结构节点(folder/tag)与活模块内容(未结任务/拍板/记忆/服务)全留，
-    // 只稀疏画布大头——kb 笔记与已完成任务（背景星云要密度感，各水母旁的"细项小光点"一颗不能少）
-    const allNodes = graph.nodes.filter(n => n.kind !== 'core');
+    // 节点过多时随机采样保上限（结构节点 folder/tag 全留，内容节点按稳定种子采样）——
+    // 星云保持密度感又不至于节点数千时糊成一片；已完成任务不进背景星云（还原最初版观感）
+    const allNodes = graph.nodes.filter(n => n.kind !== 'core' && !(n.kind === 'task' && n.task?.status === 'done'));
     const CAP = 400;
     const rnd = id => { let s = 0; for (const c of id) s = (s * 131 + c.charCodeAt(0)) >>> 0; return (s % 9973) / 9973; };
-    const mustKeep = n => n.kind === 'folder' || n.kind === 'tag' || n.kind === 'decision' || n.kind === 'memory' || n.kind === 'service' || (n.kind === 'task' && n.task?.status !== 'done');
-    const must = allNodes.filter(mustKeep), rest = allNodes.filter(n => !mustKeep(n));
     const nodes = (allNodes.length > CAP
-      ? [...must, ...rest.filter(n => rnd(n.id) < (CAP - must.length) / Math.max(rest.length, 1))]
+      ? allNodes.filter(n => n.kind === 'folder' || n.kind === 'tag' || rnd(n.id) < (CAP - allNodes.filter(x => x.kind === 'folder' || x.kind === 'tag').length) / allNodes.length)
       : allNodes)
       .map((n, i) => ({
       n, p: layout[n.id], d: depth.get(n.id) ?? 4, seed: (i * 9301 + 49297) % 233280 / 233280,
@@ -108,9 +106,9 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         const p = Math.min(p1, p2) * grow;
         if (p <= .02) continue;
         const on = !hl || (hl.has(k.l.a) && hl.has(k.l.b));
-        let a = (k.l.both ? .38 : k.l.kind === 'wiki' ? .5 : k.l.kind === 'contain' ? .16 : .16) * p * (on ? 1 : .25) * (hl && on ? 2.2 : 1);
+        let a = (k.l.both ? .32 : k.l.kind === 'wiki' ? .3 : k.l.kind === 'contain' ? .16 : .11) * p * (on ? 1 : .25) * (hl && on ? 2.2 : 1);
         ctx.strokeStyle = k.l.both ? `rgba(${P.mutual},${a})` : k.l.kind === 'wiki' ? `rgba(${P.wiki},${a})` : `rgba(${P.link},${a})`;
-        ctx.lineWidth = k.l.both ? .6 + Math.min(k.l.w, 6) * .22 : .9;
+        ctx.lineWidth = k.l.both ? .6 + Math.min(k.l.w, 6) * .22 : .7;
         ctx.beginPath(); ctx.moveTo(x1, y1);
         if (k.l.both) { const mx = (x1 + x2) / 2 + (y2 - y1) * .12, my = (y1 + y2) / 2 - (x2 - x1) * .12; ctx.quadraticCurveTo(mx, my, x2, y2); }
         else ctx.lineTo(x2, y2);
@@ -155,23 +153,10 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         ctx.globalAlpha = a;
         if (x.n.kind === 'ghost') { ctx.setLineDash([2, 2]); ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(px, py, r + 1, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
         else ctx.drawImage(orbSprite(color, P.light), px - r, py - r, r * 2, r * 2);
-        if (L.stage === 'hub' && p > .9) {
-          // 标签分层（Obsidian 图谱式星系感）：锚点常亮；内容节点平时浅浅显示文字（看得出第二层的模糊感），
-          // 悬停某模块时命中类与其关联节点提亮、其余近乎隐去——中心与外围拉开对比
-          const isFolder = x.n.kind === 'folder';
-          const isDoneTask = x.n.kind === 'task' && x.n.task?.status === 'done';
-          const inHl = hl && hl.has(x.n.id);
-          const la = isFolder ? .95
-            : hl ? (inHl ? .92 : .05)
-            : .52;
-          if (!isDoneTask && la > .06) {
-            ctx.globalAlpha = a * la;
-            ctx.fillStyle = P.label;
-            ctx.font = `${isFolder ? 12.5 : 10}px -apple-system, "PingFang SC", sans-serif`;
-            if (isFolder) { ctx.shadowColor = 'rgba(0, 0, 0, .8)'; ctx.shadowBlur = 5; }
-            ctx.fillText((x.n.short || x.n.title).slice(0, isFolder ? 14 : 10), px + r + 4, py + 3);
-            ctx.shadowBlur = 0;
-          }
+        if (L.stage === 'hub' && p > .9 && (x.n.kind === 'folder' || (hlLabel && hlLabel.has(x.n.id) && on))) {
+          ctx.globalAlpha = a * (x.n.kind === 'folder' ? .85 : .8);
+          ctx.fillStyle = P.label; ctx.font = `${x.n.kind === 'folder' ? 11.5 : 10.5}px -apple-system, "PingFang SC", sans-serif`;
+          ctx.fillText((x.n.short || x.n.title).slice(0, 14), px + r + 5, py + 3.5);
         }
         ctx.globalAlpha = 1;
       }
