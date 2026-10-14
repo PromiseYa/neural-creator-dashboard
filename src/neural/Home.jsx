@@ -305,12 +305,12 @@ export function targets(L, t) {
         const ux = ex / elen, uy = ey / elen;
         const proj = clamp((abs[i][0] - ocx) * ux + (abs[i][1] - ocy) * uy, 0, elen);   // 线上最近点（含两端）
         const px = ocx + ux * proj, py = ocy + uy * proj;
-        const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .48 + 20;
+        const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .48 + 12;
         if (d > 0.01 && d < minD) {
           const nx = dx / d, ny = dy / d, push = minD - d;
           rm.x += nx * push; rm.y += ny * push; abs[i][0] += nx * push; abs[i][1] += ny * push;
           const vn = rm.vx * nx + rm.vy * ny;
-          if (vn < 0) { rm.vx -= 2 * vn * nx; rm.vy -= 2 * vn * ny; rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; rm.hitAt = t; rm.spd = Math.max(rm.spd, 9); }   // 反弹+受惊收缩+弹开提速
+          if (vn < 0) { rm.vx -= 2 * vn * nx; rm.vy -= 2 * vn * ny; rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; }
         }
       }
     }
