@@ -153,11 +153,16 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .hub-copy { position: absolute; left: 40px; top: 104px; max-width: 360px; transition: opacity .6s, transform .6s; animation: introFade 1.2s .5s both; pointer-events: none; }
 .stage-module .hub-copy, .stage-note .hub-copy { opacity: 0; transform: translateY(-10px); }
 /* —— 生态流水（左侧竖条，全视图固定）：无边框无底色，左上文案下方垂到屏幕底，面板可滚、底部渐隐 —— */
-.ecostream { position: absolute; left: 44px; bottom: 0; width: 330px; z-index: 1; display: flex; flex-direction: column; animation: introFade 1s 2s both; pointer-events: none; }
+.ecostream { position: absolute; left: 44px; bottom: 0; width: 330px; z-index: 1; display: flex; flex-direction: column; animation: ecoIntro 1s 2s backwards; pointer-events: auto;
+  /* 平时重度虚化隐入星野（把注意力让给神经网络动画），光标移入才显形；
+     容器可命中：滚轮在流水分支里走原生滚动，不与画布平移打架 */
+  opacity: .26; filter: saturate(.6); transition: opacity .45s ease, filter .45s ease; }
+@keyframes ecoIntro { from { opacity: 0; } to { opacity: .26; } }   /* backwards 填充：结束后释放控制权给 hover/虚化，勿用 both */
+.ecostream.lit, .ecostream:hover, .ecostream:focus-within { opacity: 1; filter: saturate(1); }   /* .lit=主通道（scene 层挡 hover），:hover 兜底 */
 .intro-done .ecostream { animation-delay: 0s; animation-duration: .5s; }
 .ecostream h3 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 6px; font-size: 10.5px; letter-spacing: .14em; color: var(--text-2); font-weight: 600; }
 .ecostream h3 em { font-weight: 400; letter-spacing: .08em; }
-.ecostream h3 b { margin-left: auto; color: var(--text); font-weight: 500; letter-spacing: 0; }
+.ecostream h3 b { margin-left: auto; color: var(--text); font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums; }
 .eco-list { display: grid; gap: 1px; overflow-y: auto; flex: 1 1 0; min-height: 0; pointer-events: auto; scrollbar-width: none; -ms-overflow-style: none;
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 30%, rgba(0, 0, 0, .45) 74%, transparent 100%);
   mask-image: linear-gradient(to bottom, #000 0%, #000 30%, rgba(0, 0, 0, .45) 74%, transparent 100%); }

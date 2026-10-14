@@ -86,7 +86,7 @@ function EcoStream({events, top}) {
   }, [events]);
   if (!events.length) return null;
   return <div className="ecostream" style={{top}} aria-label="生态流水">
-    <h3>生态流水 <em>Stream</em><b>{events.length}</b></h3>
+    <h3>生态流水 <em>Stream</em> · <b>{events.length} 条动态</b></h3>
     <div className="eco-list">
       {events.map(e => (
         <div key={e.id ?? (e.ts + (e.detail || ''))} className={`eco-item${freshIds.has(e.id) ? ' fresh' : ''}`}>
@@ -238,7 +238,8 @@ export function targets(L, t) {
       const a = (m.angle + swim * 10 * Math.sin(t * .22 + i * 1.7)) * Math.PI / 180;
       const r = 1 + swim * .07 * Math.sin(t * .3 + i);
       const jj = {x: W / 2 + Math.cos(a) * rx * r, y: cy + Math.sin(a) * ry * r + swim * 14 * Math.sin(t * .8 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1, tilt: swim * 6 * Math.sin(t * .6 + i)};
-      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 300 && d > 2) { const f = (1 - d / 300) * 34; jj.x += dx / d * f; jj.y += dy / d * f; } }
+      // 黑洞式吸引：越近拉力越陡（u^1.8），水母同时缩小、朝光标倾倒——被引力场缓缓吞入的错觉
+      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 300 && d > 2) { const u = 1 - d / 300; const f = Math.pow(u, 1.8) * 34; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .22; jj.tilt += Math.max(-12, Math.min(12, Math.atan2(dy, dx) * 180 / Math.PI * u * .3)); } }
       res.jelly[m.id] = jj;
     });
   } else if (narrow) {
@@ -257,8 +258,8 @@ export function targets(L, t) {
       const sel = m.id === L.mod, k = slotOf(L.mod, m.id);
       // 左右摇摆漂浮（幅 12px，选中水母也漂，触须有弹簧自然跟随）；上下起伏 9px；相位错开
       const jj = {x: colX + (sel ? 16 : 0) + swim * 12 * Math.sin(t * .26 + i * 1.7), y: cy + (k - 2) * gap + swim * 9 * Math.sin(t * .9 + i * 2), s: sel ? 128 : 92, o: sel ? 1 : .6, tilt: swim * 3 * Math.sin(t * .6 + i)};
-      // 侧列鼠标吸引限幅 16px（列距 122，不给触须和标签制造交织）
-      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 240 && d > 2) { const f = (1 - d / 240) * 16; jj.x += dx / d * f; jj.y += dy / d * f; } }
+      // 侧列同款黑洞吸引（温和版）：拉力 u^1.4 限 16px，缩小 12%，倾倒 ±8°——列距 122 内不交织
+      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 240 && d > 2) { const u = 1 - d / 240; const f = Math.pow(u, 1.4) * 16; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .12; jj.tilt += Math.max(-8, Math.min(8, Math.atan2(dy, dx) * 180 / Math.PI * u * .2)); } }
       res.jelly[m.id] = jj;
     });
     // 伞状条目以右侧分析栏为基准排在它左边约 90px 处（条目最宽约 270px），触须拉长、画面左右均衡；
@@ -437,7 +438,10 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         let fl = FL[m.id];
         if (!fl) fl = FL[m.id] = {until: 0, next: t + 2 + Math.random() * 6};
         if (!L.reduced && t >= fl.next) { fl.until = t + 1.1; fl.next = t + 4 + Math.random() * 7; }
-        const fv = !L.reduced && t < fl.until ? Math.sin((1 - (fl.until - t) / 1.1) * Math.PI) : 0;
+        const fv0 = !L.reduced && t < fl.until ? Math.sin((1 - (fl.until - t) / 1.1) * Math.PI) : 0;
+        // 吸积增亮：光标逼近（黑洞视界）时水母自体光亮抬升——先被点亮再被吞入
+        let fv = fv0;
+        if (!L.reduced && L.smx != null) { const ddx = L.smx - x, ddy = L.smy - y; const dd = Math.hypot(ddx, ddy); if (dd < 260) fv = Math.max(fv, (1 - dd / 260) * .6); }
         if (el) el.style.setProperty('--fl', fv.toFixed(3));
         if (inner) inner.style.transform = `rotate(${tg.tilt}deg) scaleX(${MOD_STYLE[m.id].flip})`;
         if (lab) {
@@ -859,8 +863,11 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     let sceneRect = null;
     const onMouseMove = e => { const L = live.current; L.cursor = {x: e.clientX, y: e.clientY};
       if (!sceneRect) sceneRect = el.getBoundingClientRect();
-      L.mx = e.clientX - sceneRect.left; L.my = e.clientY - sceneRect.top; };
-    const onSceneLeave = () => { live.current.mx = null; sceneRect = null; };
+      L.mx = e.clientX - sceneRect.left; L.my = e.clientY - sceneRect.top;
+      // 流水显形判定：scene 层盖在流水上（z-index 2>1），CSS :hover 收不到——用坐标直接点亮 .lit
+      const es = document.querySelector('.ecostream');
+      if (es) { const r = es.getBoundingClientRect(); es.classList.toggle('lit', e.clientX >= r.left - 10 && e.clientX <= r.right + 10 && e.clientY >= r.top - 8 && e.clientY <= r.bottom + 8); } };
+    const onSceneLeave = () => { live.current.mx = null; sceneRect = null; document.querySelector('.ecostream')?.classList.remove('lit'); };
     window.addEventListener('mousemove', onMouseMove);
     el.addEventListener('pointerleave', onSceneLeave);
     return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('touchmove', onTouchMove); el.removeEventListener('touchend', onTouchEnd);
@@ -992,7 +999,9 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     </div>}
     {stage === 'hub' && <Dock graph={graph} onGo={go}/>}
     {/* 流水：全视图固定左侧，顶部贴左上提示行下方；面板内可滚（滚轮/触屏，滚动条隐藏），底部渐隐 */}
-    <EcoStream events={ecoEvents} top={streamTop}/>
+    {/* 流水只在主页常驻：平时重度虚化隐入背景（突出神经网络动画），光标移上去才显形；
+        点进模块后整体退场——把画面完全让给水母形态与层级动画（R43 用户拍板） */}
+    {stage === 'hub' && <EcoStream events={ecoEvents} top={streamTop}/>}
     {/* 宽屏 kb 钻取时层级轨迹已由画布上的横排胶囊承担，这里只在窄屏显示，避免两套面包屑重复 */}
     {zoneChain && stage === 'module' && size.w < 760 && <div className="zone-trail" aria-label="层级轨迹">
       {zoneChain.map((c, i) => (
