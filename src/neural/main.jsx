@@ -121,10 +121,19 @@ function App() {
   const openInGraph = id => {
     const n = graph.index.get(id);
     const mod = {task: 'tasks', note: 'kb', decision: 'decisions', memory: 'memory', service: 'services'}[n?.kind];
-    // 落到内容真实所在的目录层（笔记=分区+子路径；已完成任务=累计完成层）
-    const z = mod === 'kb' && String(n.folder || '').startsWith('f:kb:')
-      ? [n.folder.slice(5), n.subzone].filter(Boolean).join('/') || null
-      : mod === 'tasks' && n.task?.status === 'done' ? '累计完成' : null;
+    // 落到内容真实所在的目录层（笔记=分区+子路径；任务=所在清单层；服务=所在分类层），
+    // 层级链完整展开：水母 → 分类 → 清单 → 选中项，不再只停在水母+第一层
+    let z = null;
+    if (mod === 'kb' && String(n.folder || '').startsWith('f:kb:'))
+      z = [n.folder.slice(5), n.subzone].filter(Boolean).join('/') || null;
+    else if (mod === 'tasks') {
+      const today = new Date().toISOString().slice(0, 10);
+      z = n.task?.status !== 'done' ? '待办'
+        : String(n.task?.done_at || '').slice(0, 10) === today ? '今日完成'
+        : '累计完成/所有';
+    }
+    else if (mod === 'services')
+      z = n.service?.group === 'worker' ? '常驻工作者' : '核心服务';
     if (mod) setFocus({mod, zone: z, sel: id});
   };
   const onAction = useCallback(a => {

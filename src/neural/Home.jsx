@@ -876,12 +876,20 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   const go = useCallback(id => {
     const n = graph.index.get(id), m = moduleOf(n);
     if (!m) return;
-    // 落到笔记真实所在的目录层（分区 + 完整子路径），层卡链与面包屑随之完整展开
-    // 落到内容真实所在层：笔记=KB 目录层；已完成任务=累计完成层（跳转/搜索点过来不迷路）
-    const z = n.kind === 'note' && String(n.folder || '').startsWith('f:kb:')
-      ? [n.folder.slice(5), n.subzone].filter(Boolean).join('/') || null
-      : n.kind === 'task' && n.task?.status === 'done' ? '累计完成' : null;
-    setFocus({mod: m.id, zone: m.id === 'kb' || m.id === 'tasks' ? z : null, sel: id});
+    // 落到内容真实所在层，层级链完整展开：水母 → 分类 → 清单 → 选中项（不再只停在水母+第一层）
+    // 笔记=KB 分区+完整子路径；任务=所在清单（待办/今日完成/累计完成-所有）；服务=所在分类
+    let z = null;
+    if (n.kind === 'note' && String(n.folder || '').startsWith('f:kb:'))
+      z = [n.folder.slice(5), n.subzone].filter(Boolean).join('/') || null;
+    else if (n.kind === 'task') {
+      const today = new Date().toISOString().slice(0, 10);
+      z = n.task?.status !== 'done' ? '待办'
+        : String(n.task?.done_at || '').slice(0, 10) === today ? '今日完成'
+        : '累计完成/所有';
+    }
+    else if (n.kind === 'service')
+      z = n.service?.group === 'worker' ? '常驻工作者' : '核心服务';
+    setFocus({mod: m.id, zone: m.id === 'kb' || m.id === 'tasks' || m.id === 'services' ? z : null, sel: id});
   }, [graph, setFocus]);
   const replay = () => {
     const L = live.current, now = performance.now();
