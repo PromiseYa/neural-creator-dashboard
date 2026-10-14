@@ -231,3 +231,23 @@ createRoot(document.getElementById('root')).render(<App/>);
 // 壁纸模式标记（WebView2 宿主里才存在 chrome.webview）：底部元素避让任务栏区，
 // 浏览器窗口模式无任务栏遮挡不受影响
 if (window.chrome?.webview) document.body.classList.add('wallpaper-mode');
+
+// FPS 诊断浮层（?fps=1 开启）：量化"卡不卡"——实时帧率/超 20ms 帧占比/最差帧耗时；
+// 不带参数时零开销，平时不渲染
+if (new URLSearchParams(location.search).get('fps')) {
+  const el = document.createElement('div');
+  el.className = 'fps-badge';
+  document.body.appendChild(el);
+  let n = 0, slow = 0, worst = 0, t0 = performance.now(), last = t0;
+  const tick = now => {
+    requestAnimationFrame(tick);
+    const dt = now - last; last = now; n++;
+    if (dt > 20) slow++;
+    if (dt < 2000 && dt > worst) worst = dt;
+    if (now - t0 >= 1000) {
+      el.textContent = `${Math.round(n * 1000 / (now - t0))} fps · 超时帧 ${Math.round(slow / n * 100)}% · 最差 ${Math.round(worst)}ms`;
+      n = 0; slow = 0; worst = 0; t0 = now;
+    }
+  };
+  requestAnimationFrame(tick);
+}

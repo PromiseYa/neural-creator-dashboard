@@ -481,37 +481,43 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           if (gdd < R && gdd > 2) pu = 1 - gdd / R;
         }
         j.pu = pu;
+        // 空闲零开销：无拉力且无在途动画时整段跳过（不写任何 DOM）——帧预算全留给水母本体；
+        // 波纹周期 2.2s 慢扩散（用户令"再慢一点"），拉力越强发得越密
         const rips = ripRefs.current[m.id] || [];
-        if (pu > .02 && t >= (j.ripNext || 0)) {
-          j.ripNext = t + Math.max(.45, .95 - pu * .55);   // 波纹间隔随拉力收紧
-          const rc = rips.find(c => c && t - (c._t || -9) > 1.35);
-          if (rc) rc._t = t;
-        }
-        rips.forEach(c => {
-          if (!c) return;
-          const ph = t - (c._t || -9) > 0 ? Math.min(1, (t - c._t) / 1.25) : 1;
-          const on = c._t && ph < 1 && pu > .02;
-          c.setAttribute('cx', x); c.setAttribute('cy', y);
-          c.setAttribute('r', Math.max(1, s * .34 + s * .82 * (1 - Math.pow(1 - ph, 2.2))));
-          c.style.opacity = on ? (1 - ph) * .48 * Math.min(1, pu * 3.5) : 0;
-        });
         const spks = sparkRefs.current[m.id] || [];
-        spks.forEach((c, k) => {
-          if (!c) return;
-          if (!c._t || t - c._t > 1.1) {
-            if (pu > .12) { c._t = t + .12 + k * .5 + Math.random() * .3; c._a = Math.random() * Math.PI * 2; }
-            else { c.style.opacity = 0; return; }
+        const ripLive = c => c && c._t && t - c._t < 2.3;
+        const sparkLive = c => c && c._t && t - c._t < 1.15;
+        if (pu > .02 || rips.some(ripLive) || spks.some(sparkLive)) {
+          if (pu > .02 && t >= (j.ripNext || 0)) {
+            j.ripNext = t + Math.max(.5, 1 - pu * .55);
+            const rc = rips.find(c => !ripLive(c));
+            if (rc) rc._t = t;
           }
-          const ph = (t - c._t) / 1.05;
-          if (ph < 0) { c.style.opacity = 0; return; }
-          const e = ph * ph * (3 - 2 * ph);   // smoothstep：先缓后急，被"吸进去"
-          const rim = s * .4, sa = c._a || 0;
-          const sx0 = x + Math.cos(sa) * rim, sy0 = y + Math.sin(sa) * rim;
-          const cx0 = (sx0 + L.smx) / 2 + Math.sin(sa + 1.7) * 24, cy0 = (sy0 + L.smy) / 2 + Math.cos(sa + 1.2) * 24;
-          c.setAttribute('cx', bez(sx0, cx0, cx0, L.smx, e));
-          c.setAttribute('cy', bez(sy0, cy0, cy0, L.smy, e));
-          c.style.opacity = pu > .04 ? Math.sin(Math.min(1, ph) * Math.PI) * .8 : 0;
-        });
+          rips.forEach(c => {
+            if (!c) return;
+            const ph = t - (c._t || -9) > 0 ? Math.min(1, (t - c._t) / 2.2) : 1;
+            const on = c._t && ph < 1 && pu > .02;
+            c.setAttribute('cx', x); c.setAttribute('cy', y);
+            c.setAttribute('r', Math.max(1, s * .34 + s * .82 * (1 - Math.pow(1 - ph, 2.2))));
+            c.style.opacity = on ? (1 - ph) * .48 * Math.min(1, pu * 3.5) : 0;
+          });
+          spks.forEach((c, k) => {
+            if (!c) return;
+            if (!c._t || t - c._t > 1.1) {
+              if (pu > .12) { c._t = t + .12 + k * .5 + Math.random() * .3; c._a = Math.random() * Math.PI * 2; }
+              else { c.style.opacity = 0; return; }
+            }
+            const ph = (t - c._t) / 1.05;
+            if (ph < 0) { c.style.opacity = 0; return; }
+            const e = ph * ph * (3 - 2 * ph);   // smoothstep：先缓后急，被"吸进去"
+            const rim = s * .4, sa = c._a || 0;
+            const sx0 = x + Math.cos(sa) * rim, sy0 = y + Math.sin(sa) * rim;
+            const cx0 = (sx0 + L.smx) / 2 + Math.sin(sa + 1.7) * 24, cy0 = (sy0 + L.smy) / 2 + Math.cos(sa + 1.2) * 24;
+            c.setAttribute('cx', bez(sx0, cx0, cx0, L.smx, e));
+            c.setAttribute('cy', bez(sy0, cy0, cy0, L.smy, e));
+            c.style.opacity = pu > .04 ? Math.sin(Math.min(1, ph) * Math.PI) * .8 : 0;
+          });
+        }
         // 光球 → 水母：神经丝与往返脉冲
         const g = threadRefs.current[m.id];
         if (g) {
@@ -541,16 +547,22 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           });
         }
       });
-      // 光标=黑洞视界：低通跟随点上的吸积双环+暗核，靠近任何水母时淡入（引力场可见）
+      // 光标=黑洞视界：低通跟随点上的吸积双环+暗核，靠近任何水母时淡入（引力场可见）；
+      // 同款空闲零开销——不可见且淡出完毕后不再写 DOM
       const gv = gravRef.current;
       if (gv) {
         let best = 0;
         MODULES.forEach(mm => { best = Math.max(best, S.jelly[mm.id].pu || 0); });
-        gv.style.opacity = L.smx != null && !L.reduced ? clamp((best - .04) * 3, 0, 1) : 0;
-        gv.style.transform = `translate3d(${L.smx || 0}px,${L.smy || 0}px,0)`;
-        const r1 = gv.children[0], r2 = gv.children[1];
-        if (r1) r1.style.strokeDashoffset = -((t * 26) % 43);
-        if (r2) r2.style.strokeDashoffset = (t * 17) % 27;
+        const target = L.smx != null && !L.reduced ? clamp((best - .04) * 3, 0, 1) : 0;
+        const cur = gv._op == null ? 0 : gv._op;
+        if (target > 0 || cur > .004) {
+          gv._op = Math.max(target, cur - dt * 1.4);   // 淡入直接跟、淡出走平滑
+          gv.style.opacity = gv._op.toFixed(3);
+          gv.style.transform = `translate3d(${L.smx || 0}px,${L.smy || 0}px,0)`;
+          const r1 = gv.children[0], r2 = gv.children[1];
+          if (r1) r1.style.strokeDashoffset = -((t * 26) % 43);
+          if (r2) r2.style.strokeDashoffset = (t * 17) % 27;
+        }
       }
       // 层级递进列（kb 钻取）：卡片弹簧状态按节点 id 全局缓存（Map）——钻深/回退时同一张卡在
       // "当前列 ↔ 祖先列"之间换角色而位置连续（旧列原地等比缩小、回退时原地放大，不重生长不闪跳）。
@@ -586,14 +598,15 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           const p = aThreadRefs.current[k]?.[i];
           if (p && src) {
             const ey = y + 15 * sc, mx = (src.x + x) / 2;
-            p.setAttribute('d', `M${src.x},${src.y} C${mx},${src.y} ${mx},${ey} ${x + 2},${ey}`);   // 终点插入卡内 2px，接住卡首圆点
+            const csw = L.reduced ? 0 : Math.sin(t * .7 + i * .9 + k * 1.3) * 5;   // 链线同款慢漂浮（端点钉死、只摆中段）
+            p.setAttribute('d', `M${src.x},${src.y} C${mx},${src.y + csw} ${mx},${ey - csw} ${x + 2},${ey}`);   // 终点插入卡内 2px，接住卡首圆点
             p.style.opacity = clamp(Math.min(o, src.o), 0, 1) * (tp.path ? .85 : .4);
             // 链线上的流动脉冲（与扇形触须同款）：水母→分类→内容 逐级接力，链路"活"起来
             const pc = aThreadPulseRefs.current[k]?.[i];
             if (pc) {
               const u = (t * .22 + i * .37 + k * .5) % 1;
               pc.setAttribute('cx', bez(src.x, mx, mx, x - 4, u));
-              pc.setAttribute('cy', bez(src.y, src.y, ey, ey, u));
+              pc.setAttribute('cy', bez(src.y, src.y + csw, ey - csw, ey, u));
               pc.style.opacity = L.reduced || L.paused ? 0 : clamp(Math.min(o, src.o), 0, 1) * Math.sin(u * Math.PI) * (tp.path ? .9 : .35);
             }
           } else if (p) p.style.opacity = 0;
@@ -621,8 +634,8 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           if (el) { el.style.transformOrigin = 'top left'; el.style.transform = `translate3d(${x}px,${y - 15}px,0) scale(${sc})`; el.style.opacity = clamp(o, 0, 1); }
           const p = fanRefs.current[i];
           if (p) {
-            const dx = x - ox2, sway = L.reduced ? 0 : Math.sin(t * 1.1 + i * .7) * 7;
-            const c1x = ox2 + dx * .5, c1y = oy2 + sway, c2x = x - dx * .45, c2y = y - sway * .5;
+            const dx = x - ox2, sway = L.reduced ? 0 : Math.sin(t * .9 + i * .7) * 9 + Math.sin(t * .47 + i * 1.9) * 4;   // 双频纵摆=活物感
+            const c1x = ox2 + dx * .5 + (L.reduced ? 0 : Math.sin(t * .6 + i) * 6), c1y = oy2 + sway, c2x = x - dx * .45, c2y = y - sway * .5;
             p.setAttribute('d', `M${ox2},${oy2} C${c1x},${c1y} ${c2x},${c2y} ${x + 2},${y}`);   // 终点插入卡内，接住卡首圆点
             const on = sel === n.id;
             p.style.opacity = clamp(o, 0, 1) * (sel ? (on ? 1 : .35) : .8);
