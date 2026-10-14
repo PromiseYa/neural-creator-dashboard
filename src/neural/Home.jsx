@@ -288,6 +288,28 @@ export function targets(L, t) {
         if (dv < 0) { A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv; }   // 仅相互接近时弹开
       }
     }
+    // 主神经（光球↔各水母的神经丝）也是实体：游进别的神经丝走廊=被碰到——沿法线弹出+速度反射，
+    // 并把漫游目标角刷新到反弹方向（否则转向加速度会立刻把它压回神经丝上反复蹭线）；
+    // 自己的神经丝终点在自己身上，跳过。神经丝画的是微弯贝塞尔，直线段近似误差 ≤13px 在碰撞阈值内
+    const ocx = W / 2, ocy = cy, jsz = narrow ? 92 : clamp(W * .12, 120, 184);
+    const abs = js.map(({rm, bx, by}) => [bx + rm.x, by + rm.y]);
+    for (let i = 0; i < js.length; i++) {
+      const rm = js[i].rm;
+      for (let k = 0; k < js.length; k++) {
+        if (k === i) continue;
+        const ex = abs[k][0] - ocx, ey = abs[k][1] - ocy, elen = Math.hypot(ex, ey) || 1;
+        const ux = ex / elen, uy = ey / elen;
+        const proj = clamp((abs[i][0] - ocx) * ux + (abs[i][1] - ocy) * uy, 0, elen);   // 线上最近点（含两端）
+        const px = ocx + ux * proj, py = ocy + uy * proj;
+        const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .48 + 12;
+        if (d > 0.01 && d < minD) {
+          const nx = dx / d, ny = dy / d, push = minD - d;
+          rm.x += nx * push; rm.y += ny * push; abs[i][0] += nx * push; abs[i][1] += ny * push;
+          const vn = rm.vx * nx + rm.vy * ny;
+          if (vn < 0) { rm.vx -= 2 * vn * nx; rm.vy -= 2 * vn * ny; rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; }
+        }
+      }
+    }
     MODULES.forEach((m, i) => {
       const {rm, bx, by} = js[i];
       const jj = {x: bx + rm.x, y: by + rm.y + swim * 14 * Math.sin(t * .8 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1,
