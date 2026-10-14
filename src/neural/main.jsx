@@ -87,7 +87,12 @@ function Reader({node, graph, onJump, onClose}) {
 }
 
 function App() {
-  const [focus, setFocus] = useState({mod: null, sel: null});
+  // URL 定位参数 ?mod=tasks&zone=累计完成：可分享/可书签直达某层（也供无头截图验证壁纸端真实渲染）
+  const [focus, setFocus] = useState(() => {
+    const q = new URLSearchParams(location.search);
+    const mod = q.get('mod'), zone = q.get('zone');
+    return mod ? {mod, zone: zone || '', sel: null} : {mod: null, sel: null};
+  });
   const [modal, setModal] = useState(null);
   const [readNode, setReadNode] = useState(null);
   const [toast, setToast] = useState('');

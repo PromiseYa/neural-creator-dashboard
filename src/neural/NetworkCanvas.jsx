@@ -180,9 +180,11 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         ctx.globalAlpha = a;
         if (x.n.kind === 'ghost') { ctx.setLineDash([2, 2]); ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(px, py, r + 1, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
         else ctx.drawImage(orbSprite(color, P.light), px - r, py - r, r * 2, r * 2);
-        if (L.stage === 'hub' && p > .9 && (x.n.kind === 'folder' || (hlLabel && hlLabel.has(x.n.id) && on))) {
-          ctx.globalAlpha = a * (x.n.kind === 'folder' ? .85 : .9);
-          ctx.fillStyle = P.label; ctx.font = `${x.n.kind === 'folder' ? 11.5 : 11.5}px -apple-system, "PingFang SC", sans-serif`;
+        if (L.stage === 'hub' && p > .9 && (x.n.kind === 'folder' || x.n.kind === 'tag' || (hlLabel && hlLabel.has(x.n.id) && on))) {
+          // tag 话题词平时也带名字（初版 concept 标签的复刻）：第二层"记忆体"有自己的名字才像信息，
+          // 38 个真实主题词淡浮在星云里；淡于 folder 锚点、亮于普通星点
+          ctx.globalAlpha = a * (x.n.kind === 'folder' ? .85 : x.n.kind === 'tag' ? .52 : .9);
+          ctx.fillStyle = P.label; ctx.font = `${x.n.kind === 'folder' ? 11.5 : 10.5}px -apple-system, "PingFang SC", sans-serif`;
           ctx.shadowColor = 'rgba(0, 0, 0, .75)'; ctx.shadowBlur = 3;   // 悬停第二层信息标签：衬底微影，星光里也读得清
           ctx.fillText((x.n.short || x.n.title).slice(0, 14), px + r + 5, py + 3.5);
           ctx.shadowBlur = 0;

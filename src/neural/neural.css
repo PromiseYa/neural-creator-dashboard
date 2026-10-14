@@ -107,14 +107,16 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .jelly:hover, .jelly.active { filter: brightness(calc(1.32 + var(--fl, 0) * .38)) saturate(1.15) drop-shadow(0 0 16px color-mix(in srgb, var(--mod, #fff) 42%, transparent)); }
 .jelly:focus-visible { outline: none; filter: brightness(1.5); }
 /* 标签始终压在所有水母的点击区之上，避免游动时被别的水母挡住 */
-.jelly-label { position: absolute; z-index: 2; left: 0; top: 0; display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon count" "name name" "sub sub"; align-items: center; column-gap: 8px; min-width: 132px; padding: 9px 6px 10px; border-radius: 12px; border: 0; background: none; backdrop-filter: none; color: var(--text); text-align: left; will-change: transform, opacity; text-shadow: 0 1px 6px rgba(0, 0, 0, .5), 0 0 14px color-mix(in srgb, var(--mod, #fff) 16%, transparent); transition: filter .3s; }
+/* 文字随模块色：白色字在白亮光晕附近看不清；模块色+深色衬底影保对比。
+   选择器带 .neural 上下文提过 .neural button 的 color:inherit reset（R21 同族坑） */
+.neural .jelly-label { position: absolute; z-index: 2; left: 0; top: 0; display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon count" "name name" "sub sub"; align-items: center; column-gap: 8px; min-width: 132px; padding: 9px 6px 10px; border-radius: 12px; border: 0; background: none; backdrop-filter: none; color: var(--mod); text-align: left; will-change: transform, opacity; text-shadow: 0 1px 6px rgba(0, 0, 0, .55), 0 0 14px color-mix(in srgb, var(--mod, #fff) 16%, transparent); transition: filter .3s; }
 .jelly-label.below { justify-items: start; }
 .jelly-label:hover { filter: drop-shadow(0 0 12px color-mix(in srgb, var(--mod) 38%, transparent)); }
 .jelly-label.active { text-shadow: 0 1px 8px rgba(0, 0, 0, .9), 0 0 26px color-mix(in srgb, var(--mod) 55%, transparent); filter: drop-shadow(0 0 14px color-mix(in srgb, var(--mod) 30%, transparent)); }
 .jl-icon { grid-area: icon; width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; color: var(--mod); background: none; filter: drop-shadow(0 0 6px color-mix(in srgb, var(--mod) 45%, transparent)); }
 .jl-count { grid-area: count; font-size: 22px; font-weight: 600; line-height: 1; }
 .jl-name { grid-area: name; margin-top: 6px; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
-.jl-sub { grid-area: sub; font-size: 10.5px; color: var(--text-2); white-space: nowrap; }
+.jl-sub { grid-area: sub; font-size: 10.5px; color: color-mix(in srgb, var(--mod) 62%, var(--text-2)); white-space: nowrap; }
 .fan-item { position: absolute; z-index: 3; left: 0; top: 0; display: flex; align-items: center; gap: 9px; height: 30px; padding: 0; border: 0; background: none; color: var(--text); text-align: left; will-change: transform, opacity; }
 .fi-dot { flex: none; width: 9px; height: 9px; margin-left: -4.5px; border-radius: 50%; background: var(--kc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--kc) 18%, transparent), 0 0 14px var(--kc); }
 .fi-body { display: grid; gap: 2px; padding: 3px 10px; border-radius: 9px; border: 1px solid transparent; transition: background .25s, border-color .25s; }
