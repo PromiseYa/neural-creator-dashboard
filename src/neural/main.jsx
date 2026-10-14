@@ -100,13 +100,23 @@ function App() {
   const [deciding, setDeciding] = useState(null);   // 待确认的拍板动作（弹窗替代原生 confirm，内嵌浏览器里原生框不渲染）
   const reduced = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
 
-  const pullRef = useRef(null);
+  const ecoSigRef = useRef('');
   useEffect(() => {
     let stop = false;
     const pull = async () => {
       try {
         const e = await fetchEcosystem();
-        if (!stop) setEco(e);
+        if (stop) return;
+        // 数据零变化跳过：setEco 会触发 buildGraph+forceLayout 全量重算（几百节点 O(N²)×520 轮，
+        // 主线程秒级占死 = 壁纸周期性冻住，10-14 深夜 10s 探针实测坐实）。
+        // 比对口径=喂给图与顶栏的全部字段；vitals 只取渲染用的 5 个计数——
+        // 排除 vitals.ts 等每轮必变但不上屏的字段，否则跳过永不生效。
+        const vv = e.vitals || {};
+        const sig = JSON.stringify([e.tasks, e.decisions, e.memories, e.memState, e.services, e.notes, e.events,
+          vv.open_tasks, vv.pending_decisions, vv.workers_ok, vv.workers_late, vv.workers_down]);
+        if (sig === ecoSigRef.current) return;
+        ecoSigRef.current = sig;
+        setEco(e);
       } catch { /* 单次失败保静默，下轮再试 */ }
     };
     pullRef.current = pull;
