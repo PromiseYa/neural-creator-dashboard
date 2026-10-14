@@ -208,7 +208,20 @@ function itemMeta(n) {
   const d = split(n);
   switch (n.kind) {
     case 'folder': return [[n.unit || (n.online != null ? '服务' : '篇数'), n.unit ? '' : (n.online != null ? 'Services' : 'Notes'), n.count || 0], n.online != null ? ['在线', 'Online', n.online] : ['', '', ''], ['', '', '']];
-    case 'task': return [[PRIO_ZH[n.task?.priority] || n.task?.priority || '—', '', ''], ['↔', '', d.both]];
+    case 'task': {
+      // 截止日上卡：超期=警报红、≤3 天临期=高亮金、更远=中性（done 不再显示）——待办清单扫一眼即知轻重缓急
+      const meta = [[PRIO_ZH[n.task?.priority] || n.task?.priority || '—', '', '']];
+      const due = n.task?.due;
+      if (due && n.task?.status !== 'done') {
+        const dd = Math.ceil((new Date(String(due).slice(0, 10) + 'T23:59:59') - Date.now()) / 864e5);
+        meta.push(dd < 0 ? ['超期', '', `${-dd} 天`, 'due-over']
+          : dd === 0 ? ['截止', '', '今天', 'due-soon']
+          : dd <= 3 ? ['截止', '', `${dd} 天`, 'due-soon']
+          : ['截止', '', String(due).slice(5), 'due-ok']);
+      }
+      meta.push(['↔', '', d.both]);
+      return meta;
+    }
     case 'note': return [['出链', 'Out', d.out], ['反链', 'In', d.back], ['↔', '', d.both]];
     case 'decision': return [[n.decision?.status || '—', '', ''], [String(n.decision?.created_at || '').slice(5, 10) || '—', '', ''], ['↔', '', d.both]];
     case 'memory': return [[n.updated ? `更新 ${String(n.updated).slice(5)}` : '记忆池', '', ''], ['↔', '', d.both], ['', '', '']];
@@ -289,7 +302,7 @@ export function targets(L, t) {
     const labRight = sjx + 128 * .5 + 10 + (L.labW || 176);
     const fanBase = Math.min(labRight + 80, panelLeft - 280);
     const SX = [fanBase, fanBase + 240, fanBase + 480];
-    const fit = !zd || SX[zd] + 270 <= W - 24;
+    const fit = !zd || SX[zd] + 300 <= W - 20;   // 300=内容卡实际最宽(~310 含徽章)，层级整体离屏右缘留 20px 呼吸
     const span = Math.max(0, n - 1) * fgap;
     // 清单顶部让位：不越过最上方水母（其下方留 70px）——鼠标点水母不被细项卡挡住，触须也更舒展
     const topJelly = cy - 2 * gap;
@@ -316,7 +329,7 @@ export function targets(L, t) {
       if (selOpen) {
         // 整体缩小+向左平移（同一刚体变换）：以光球左缘为锚，把 水母列/祖先列/文件列 一起压缩到详情页左侧。
         // g 按笔记模式标题收窄后的实际卡宽估（160+边距≈200），面板已收窄让位 → 缩得更少
-        const AX = 125, g = Math.min(1, (panelLeft - 20 - AX) / (SX[zd] - AX + 200));
+        const AX = 125, g = Math.min(1, (panelLeft - 36 - AX) / (SX[zd] - AX + 250));   // 250=笔记态卡宽上限(标题160+徽章)，层级整体与详情栏恒留 36px 不压栏
         const mx = v => AX + (v - AX) * g;
         res.noteG = g;
         res.orb.x = mx(res.orb.x); res.orb.s *= g;
@@ -378,6 +391,7 @@ const bez = (p0, p1, p2, p3, u) => { const m = 1 - u; return m * m * m * p0 + 3 
 function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zonePath, ancLevels, zone}) {
   const dustRef = useRef(null);
   const orbRef = useRef(null), jellyRefs = useRef({}), innerRefs = useRef({}), labelRefs = useRef({}), threadRefs = useRef({}), pulseRefs = useRef({}), sceneRef = useRef(null);
+  const ripRefs = useRef({}), sparkRefs = useRef({}), gravRef = useRef(null);   // 引力可见化：水波纹/吸入光丝/光标视界环
   const itemRefs = useRef([]), fanRefs = useRef([]), fanPulseRefs = useRef([]);
   const aItemRefs = useRef([]), aThreadRefs = useRef([]), aThreadPulseRefs = useRef([]);
   const vids = useRef({});
@@ -458,6 +472,46 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           lab.style.opacity = clamp(narrow && !hub && m.id !== L.mod ? 0 : lo, 0, 1);
           j.label = {x: lx, y: ly, w: lw * ng, h: lh * ng};   // w/h 记缩放后的视觉宽：连线起点才不会错位
         }
+        // —— 光标引力可见化：位移吸引在 targets 里已算好，这里按弹簧后的真实位置重算拉力强度，
+        // 驱动三层特效——水母伞缘水波纹（拉得越强纹越密）、吸入光丝（光点漂向光标）、光标吸积环 ——
+        let pu = 0;
+        if (L.smx != null && !L.reduced) {
+          const R = L.stage === 'hub' ? 300 : 240;
+          const gdx = L.smx - x, gdy = L.smy - y, gdd = Math.hypot(gdx, gdy);
+          if (gdd < R && gdd > 2) pu = 1 - gdd / R;
+        }
+        j.pu = pu;
+        const rips = ripRefs.current[m.id] || [];
+        if (pu > .02 && t >= (j.ripNext || 0)) {
+          j.ripNext = t + Math.max(.45, .95 - pu * .55);   // 波纹间隔随拉力收紧
+          const rc = rips.find(c => c && t - (c._t || -9) > 1.35);
+          if (rc) rc._t = t;
+        }
+        rips.forEach(c => {
+          if (!c) return;
+          const ph = t - (c._t || -9) > 0 ? Math.min(1, (t - c._t) / 1.25) : 1;
+          const on = c._t && ph < 1 && pu > .02;
+          c.setAttribute('cx', x); c.setAttribute('cy', y);
+          c.setAttribute('r', Math.max(1, s * .34 + s * .82 * (1 - Math.pow(1 - ph, 2.2))));
+          c.style.opacity = on ? (1 - ph) * .48 * Math.min(1, pu * 3.5) : 0;
+        });
+        const spks = sparkRefs.current[m.id] || [];
+        spks.forEach((c, k) => {
+          if (!c) return;
+          if (!c._t || t - c._t > 1.1) {
+            if (pu > .12) { c._t = t + .12 + k * .5 + Math.random() * .3; c._a = Math.random() * Math.PI * 2; }
+            else { c.style.opacity = 0; return; }
+          }
+          const ph = (t - c._t) / 1.05;
+          if (ph < 0) { c.style.opacity = 0; return; }
+          const e = ph * ph * (3 - 2 * ph);   // smoothstep：先缓后急，被"吸进去"
+          const rim = s * .4, sa = c._a || 0;
+          const sx0 = x + Math.cos(sa) * rim, sy0 = y + Math.sin(sa) * rim;
+          const cx0 = (sx0 + L.smx) / 2 + Math.sin(sa + 1.7) * 24, cy0 = (sy0 + L.smy) / 2 + Math.cos(sa + 1.2) * 24;
+          c.setAttribute('cx', bez(sx0, cx0, cx0, L.smx, e));
+          c.setAttribute('cy', bez(sy0, cy0, cy0, L.smy, e));
+          c.style.opacity = pu > .04 ? Math.sin(Math.min(1, ph) * Math.PI) * .8 : 0;
+        });
         // 光球 → 水母：神经丝与往返脉冲
         const g = threadRefs.current[m.id];
         if (g) {
@@ -487,6 +541,17 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           });
         }
       });
+      // 光标=黑洞视界：低通跟随点上的吸积双环+暗核，靠近任何水母时淡入（引力场可见）
+      const gv = gravRef.current;
+      if (gv) {
+        let best = 0;
+        MODULES.forEach(mm => { best = Math.max(best, S.jelly[mm.id].pu || 0); });
+        gv.style.opacity = L.smx != null && !L.reduced ? clamp((best - .04) * 3, 0, 1) : 0;
+        gv.style.transform = `translate3d(${L.smx || 0}px,${L.smy || 0}px,0)`;
+        const r1 = gv.children[0], r2 = gv.children[1];
+        if (r1) r1.style.strokeDashoffset = -((t * 26) % 43);
+        if (r2) r2.style.strokeDashoffset = (t * 17) % 27;
+      }
       // 层级递进列（kb 钻取）：卡片弹簧状态按节点 id 全局缓存（Map）——钻深/回退时同一张卡在
       // "当前列 ↔ 祖先列"之间换角色而位置连续（旧列原地等比缩小、回退时原地放大，不重生长不闪跳）。
       // 每列的触须都从上一列"钻入卡"右缘扇形展开（首列由水母标签喂养）——"水母→下一层"同一模式逐级复用
@@ -613,7 +678,14 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], glow: el}; }} className="thread-glow" filter="url(#thread-blur)"/>
         <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], core: el}; }} className="thread-core"/>
         {[0, 1, 2].map(k => <circle key={k} r={k === 2 ? 4.5 : 5.5} fill={`url(#${k === 2 ? 'pulse-in' : 'pulse-out'})`} ref={el => { (pulseRefs.current[m.id] ||= [])[k] = el; }}/>)}
+        {[0, 1, 2].map(k => <circle key={'rip' + k} className="jelly-rip" r="10" ref={el => { (ripRefs.current[m.id] ||= [])[k] = el; }}/>)}
+        {[0, 1].map(k => <circle key={'spk' + k} className="jelly-spark" r="2.2" ref={el => { (sparkRefs.current[m.id] ||= [])[k] = el; }}/>)}
       </g>)}
+      <g className="grav" ref={gravRef} aria-hidden="true">
+        <circle className="grav-ring" r="30"/>
+        <circle className="grav-ring2" r="21"/>
+        <circle className="grav-core" r="8"/>
+      </g>
       {(t0.acols ? ancLevels || [] : []).map((lvl, k) => lvl.map((n, i) => <g key={'at' + k + n.id}>
         <path className="chain-thread dim" ref={el => { (aThreadRefs.current[k] ||= [])[i] = el; }}/>
         <circle r="4" fill="url(#pulse-out)" ref={el => { (aThreadPulseRefs.current[k] ||= [])[i] = el; }}/>
@@ -656,7 +728,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         <span className="fi-dot"/>
         <span className="fi-body">
           <span className="fi-title">{n.short || n.title}</span>
-          <span className="fi-meta">{meta.map(([kk, en, v], j) => <span key={j} className={kk === '↔' ? 'mutual' : ''}>{kk}{en && <em>{en}</em>} {v !== '' && <b>{v}</b>}</span>)}</span>
+          <span className="fi-meta">{meta.map(([kk, en, v, cls], j) => <span key={j} className={cls || (kk === '↔' ? 'mutual' : '')}>{kk}{en && <em>{en}</em>} {v !== '' && <b>{v}</b>}</span>)}</span>
         </span>
         {bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}
       </button>;
@@ -670,7 +742,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         <span className="fi-dot"/>
         <span className="fi-body">
           <span className="fi-title">{n.short || n.title}</span>
-          <span className="fi-meta">{meta.map(([k, en, v], j) => <span key={j} className={k === '↔' ? 'mutual' : ''}>{k}{en && <em>{en}</em>} {v !== '' && <b>{v}</b>}</span>)}</span>
+          <span className="fi-meta">{meta.map(([k, en, v, cls], j) => <span key={j} className={cls || (k === '↔' ? 'mutual' : '')}>{k}{en && <em>{en}</em>} {v !== '' && <b>{v}</b>}</span>)}</span>
         </span>
         {n.kind === 'task' && bd ? <TaskStatusFan badge={bd} task={n.task} onAction={onAction}/>
           : bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}
