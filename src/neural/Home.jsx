@@ -256,42 +256,55 @@ export function targets(L, t) {
       return {x: W / 2 + Math.cos(a) * rx * rr, y: cy + Math.sin(a) * ry * rr};
     });
     const js = MODULES.map((m, i) => {
-      const rm = RM[m.id] || (RM[m.id] = {x: 0, y: 0, vx: 4, vy: 0, ang: Math.random() * 6.28, spd: 6, turnAt: 0, targetAng: 0, targetSpd: 7});
+      const rm = RM[m.id] || (RM[m.id] = {x: 0, y: 0, vx: 4, vy: 0, ang: Math.random() * 6.28, spd: 6, turnAt: 0, targetAng: 0, targetSpd: 7, hitAt: 0});
       if (swim) {
-        if (t >= rm.turnAt) { rm.turnAt = t + 3.5 + Math.random() * 5.5; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 4 + Math.random() * 9; }   // 随机掉头
+        // 光标吸引=真追逐（跟手的关键，仿真验证 100% 跟随/最大距离 119px）：进入 300px 换目标角为
+        // 前置预测角（朝光标去向游，折返不甩尾）、速度按"距离+光标速度"自适应（追得上慢拖）；
+        // 追逐态转向/加速更灵敏、豁免归心；鼠标移开后 turnAt 到期恢复随机漫游（慵懒参数不变）
+        let chase = false;
+        if (L.smx != null) {
+          const cdx = L.smx - (base[i].x + rm.x), cdy = L.smy - (base[i].y + rm.y), cd = Math.hypot(cdx, cdy);
+          if (cd < 300 && cd > 4) { chase = true; rm.targetAng = Math.atan2(cdy + (L.smvy || 0) * .7, cdx + (L.smvx || 0) * .7); rm.targetSpd = clamp(6 + cd * .08 + Math.hypot(L.smvx || 0, L.smvy || 0) * 1.15, 8, 46); rm.turnAt = t + .5; }
+        }
+        if (!chase && t >= rm.turnAt) { rm.turnAt = t + 3.5 + Math.random() * 5.5; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 4 + Math.random() * 9; }   // 随机掉头
         let da = rm.targetAng - rm.ang; da = Math.atan2(Math.sin(da), Math.cos(da));
-        rm.ang += clamp(da, -1.1 * dt, 1.1 * dt);   // 受限角速度=转弯柔和
-        rm.spd += (rm.targetSpd - rm.spd) * Math.min(1, dt * .5);
-        rm.vx += (Math.cos(rm.ang) * rm.spd - rm.vx) * Math.min(1, dt * .8);
-        rm.vy += (Math.sin(rm.ang) * rm.spd * .45 - rm.vy) * Math.min(1, dt * .8);
+        const turn = chase ? 2.4 : 1.1, acc = chase ? 1.8 : .5, fol = chase ? 2.4 : .8;
+        rm.ang += clamp(da, -turn * dt, turn * dt);   // 受限角速度=转弯柔和（追逐时更灵敏）
+        rm.spd += (rm.targetSpd - rm.spd) * Math.min(1, dt * acc);
+        rm.vx += (Math.cos(rm.ang) * rm.spd - rm.vx) * Math.min(1, dt * fol);
+        rm.vy += (Math.sin(rm.ang) * rm.spd * .45 - rm.vy) * Math.min(1, dt * fol);
         rm.x += rm.vx * dt; rm.y += rm.vy * dt;
-        const dHome = Math.hypot(rm.x, rm.y);   // 远超 600px 才有极弱归心（防集体漂到一侧，平时感知不到）
-        if (dHome > 600) { rm.x -= rm.x / dHome * (dHome - 600) * dt * .5; rm.y -= rm.y / dHome * (dHome - 600) * dt * .5; }
+        const dHome = Math.hypot(rm.x, rm.y);   // 远超 600px 才有极弱归心（防集体漂到一侧，平时感知不到；追逐时豁免）
+        if (!chase && dHome > 600) { rm.x -= rm.x / dHome * (dHome - 600) * dt * .5; rm.y -= rm.y / dHome * (dHome - 600) * dt * .5; }
       }
-      return {rm, bx: base[i].x, by: base[i].y};
+      return {rm, bx: base[i].x, by: base[i].y, id: m.id};
     });
-    js.forEach(({rm, bx, by}) => {   // 边界反弹（按绝对位置）
-      const ax = bx + rm.x, ay = by + rm.y;
-      if (ax < 100) { rm.x = 100 - bx; rm.vx = Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
-      if (ax > W - 100) { rm.x = W - 100 - bx; rm.vx = -Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
-      if (ay < 90) { rm.y = 90 - by; rm.vy = Math.abs(rm.vy); rm.ang = -rm.ang; }
-      if (ay > H - 90) { rm.y = H - 90 - by; rm.vy = -Math.abs(rm.vy); rm.ang = -rm.ang; }
+    const LB = L.labSz || (L.labSz = {});   // 标签实测尺寸缓存（step 每帧写入），反弹边界含文字
+    const ocx = W / 2, ocy = cy, jsz = narrow ? 92 : clamp(W * .12, 120, 184);
+    js.forEach(j => {   // 边界反弹（按绝对位置）：余量=伞体半径与标签半宽取大，上=伞顶，下=标签底——头部和文字都不出屏
+      const {rm, id} = j, s = jsz, lb = LB[id] || {w: 132, h: 56};
+      const ax = j.bx + rm.x, ay = j.by + rm.y;
+      const mSide = Math.max(s * .45, lb.w / 2) + 10, mTop = s * .375 + 8, mBot = s * .36 + lb.h + 10;
+      if (ax < mSide) { rm.x = mSide - j.bx; rm.vx = Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; rm.hitAt = t; }
+      if (ax > W - mSide) { rm.x = W - mSide - j.bx; rm.vx = -Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; rm.hitAt = t; }
+      if (ay < mTop) { rm.y = mTop - j.by; rm.vy = Math.abs(rm.vy); rm.ang = -rm.ang; rm.hitAt = t; }
+      if (ay > H - mBot) { rm.y = H - mBot - j.by; rm.vy = -Math.abs(rm.vy); rm.ang = -rm.ang; rm.hitAt = t; }
     });
-    for (let i = 0; i < js.length; i++) for (let k = i + 1; k < js.length; k++) {   // 成对相撞：互换法向速度+位置各退一半重叠
+    for (let i = 0; i < js.length; i++) for (let k = i + 1; k < js.length; k++) {   // 成对相撞（椭圆判定：水平含标签半宽，垂直按伞体）互换法向速度+位置分离
       const A = js[i], B = js[k];
       const dx = (A.bx + A.rm.x) - (B.bx + B.rm.x), dy = (A.by + A.rm.y) - (B.by + B.rm.y);
-      const d = Math.hypot(dx, dy), minD = 150;
-      if (d > 0.01 && d < minD) {
-        const nx = dx / d, ny = dy / d, push = (minD - d) / 2;
-        A.rm.x += nx * push; A.rm.y += ny * push; B.rm.x -= nx * push; B.rm.y -= ny * push;
+      const rx = jsz * .42 + ((LB[A.id] || {w: 132}).w + (LB[B.id] || {w: 132}).w) * .31, ry = jsz * .62 + 8;
+      const nx0 = dx / rx, ny0 = dy / ry, dd = Math.hypot(nx0, ny0);
+      if (dd > 0.01 && dd < 1) {
+        const nx = nx0 / dd, ny = ny0 / dd, push = (1 - dd) / 2;
+        A.rm.x += nx * push * rx; A.rm.y += ny * push * ry; B.rm.x -= nx * push * rx; B.rm.y -= ny * push * ry;
         const dv = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
-        if (dv < 0) { A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv; }   // 仅相互接近时弹开
+        if (dv < 0) { A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv; A.rm.hitAt = t; B.rm.hitAt = t; }   // 仅相互接近时弹开
       }
     }
     // 主神经（光球↔各水母的神经丝）也是实体：游进别的神经丝走廊=被碰到——沿法线弹出+速度反射，
     // 并把漫游目标角刷新到反弹方向（否则转向加速度会立刻把它压回神经丝上反复蹭线）；
     // 自己的神经丝终点在自己身上，跳过。神经丝画的是微弯贝塞尔，直线段近似误差 ≤13px 在碰撞阈值内
-    const ocx = W / 2, ocy = cy, jsz = narrow ? 92 : clamp(W * .12, 120, 184);
     const abs = js.map(({rm, bx, by}) => [bx + rm.x, by + rm.y]);
     for (let i = 0; i < js.length; i++) {
       const rm = js[i].rm;
@@ -301,21 +314,22 @@ export function targets(L, t) {
         const ux = ex / elen, uy = ey / elen;
         const proj = clamp((abs[i][0] - ocx) * ux + (abs[i][1] - ocy) * uy, 0, elen);   // 线上最近点（含两端）
         const px = ocx + ux * proj, py = ocy + uy * proj;
-        const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .48 + 12;
+        const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .48 + 20;
         if (d > 0.01 && d < minD) {
           const nx = dx / d, ny = dy / d, push = minD - d;
           rm.x += nx * push; rm.y += ny * push; abs[i][0] += nx * push; abs[i][1] += ny * push;
           const vn = rm.vx * nx + rm.vy * ny;
-          if (vn < 0) { rm.vx -= 2 * vn * nx; rm.vy -= 2 * vn * ny; rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; }
+          if (vn < 0) { rm.vx -= 2 * vn * nx; rm.vy -= 2 * vn * ny; rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; rm.hitAt = t; rm.spd = Math.max(rm.spd, 9); }   // 反弹+受惊收缩+弹开提速
         }
       }
     }
     MODULES.forEach((m, i) => {
       const {rm, bx, by} = js[i];
-      const jj = {x: bx + rm.x, y: by + rm.y + swim * 14 * Math.sin(t * .8 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1,
-        tilt: swim * 4 * Math.sin(t * .6 + i) + clamp(rm.vx * 1.4, -16, 16)};   // 头随移动方向倾倒
-      // 黑洞式吸引：越近拉力越陡（u^1.8），水母缩小、头转向光标——被引力场缓缓吞入的错觉
-      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 300 && d > 2) { const u = 1 - d / 300; const f = Math.pow(u, 1.8) * 34; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .22; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .4, -18, 18); } }
+      const jj = {x: bx + rm.x, y: by + rm.y + swim * 7 * Math.sin(t * .8 + i * 2.1), s: jsz, o: 1,
+        tilt: clamp(rm.vx * 1.6, -18, 18) + swim * 2 * Math.sin(t * .6 + i),   // 倾倒主要由真实水平速度驱动（活物感），仅叠 2° 微摆
+        spd: Math.hypot(rm.vx, rm.vy), vy: rm.vy, hit: rm.hitAt || 0};   // 供水母伞体脉动/俯仰渲染
+      // 近距强吸：追逐物理（上面）把水母带到光标 150px 内后，黑洞拉力近乎贴住光标；缩小、头转向光标
+      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 150 && d > 2) { const u = 1 - d / 150; const f = Math.pow(u, 1.6) * 92; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .25; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .4, -18, 18); } }
       jj.tilt = clamp(jj.tilt, -26, 26);
       res.jelly[m.id] = jj;
     });
@@ -335,8 +349,8 @@ export function targets(L, t) {
       const sel = m.id === L.mod, k = slotOf(L.mod, m.id);
       // 左右摇摆漂浮（幅 12px，选中水母也漂，触须有弹簧自然跟随）；上下起伏 9px；相位错开
       const jj = {x: colX + (sel ? 16 : 0) + swim * 12 * Math.sin(t * .26 + i * 1.7), y: cy + (k - 2) * gap + swim * 9 * Math.sin(t * .9 + i * 2), s: sel ? 128 : 92, o: sel ? 1 : .6, tilt: swim * 3 * Math.sin(t * .6 + i) + swim * 4 * Math.cos(t * .26 + i * 1.7)};   // 末项=头随横摆方向倾倒
-      // 侧列同款黑洞吸引（温和版）：拉力 u^1.4 限 16px，缩小 12%，头转向光标（与 hub 同款 atan2(dx,-dy)）
-      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 240 && d > 2) { const u = 1 - d / 240; const f = Math.pow(u, 1.4) * 16; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .12; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .3, -12, 12); } }
+      // 侧列同款黑洞吸引（加强版）：拉力 u^1.7 限 34px（旧 16px 吸不住），缩小 12%，头转向光标（与 hub 同款 atan2(dx,-dy)）
+      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 240 && d > 2) { const u = 1 - d / 240; const f = Math.pow(u, 1.7) * 34; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .12; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .3, -12, 12); } }
       res.jelly[m.id] = jj;
     });
     // 伞状条目以右侧分析栏为基准排在它左边约 90px 处（条目最宽约 270px），触须拉长、画面左右均衡；
@@ -361,8 +375,9 @@ export function targets(L, t) {
     // 水母层→首列与其他层同节奏：标签移到水母正下方（不占连线路径），触须从伞体右缘+6px 出发，
     // 伞体右缘 → 首列 = 80px（76 线）——不再隔着一个 132~176px 宽的标签（旧观感总间距 ~286px）。
     // 锚点用当帧水母真实位置（含游弋漂移）——列跟水母同组微漂，线长恒定
+    // 本体右缘系数按镜像分：内容居中后 flip=1 的视觉右缘在 81%s，flip=-1（镜像）贴元素右缘 98%s
     const sjx = L.mod && res.jelly[L.mod] ? res.jelly[L.mod] : null;
-    const bodyRight = (sjx ? sjx.x : colX + 16) + (sjx ? sjx.s : 128) * .5;
+    const bodyRight = (sjx ? sjx.x : colX + 16) + (sjx ? sjx.s : 128) * ((sjx && MOD_STYLE[L.mod]?.flip !== 1) ? .98 : .81);
     const fanBase = Math.min(bodyRight + 80, panelLeft - 280);
     const SX = [fanBase, fanBase + 240, fanBase + 480];
     const fit = !zd || SX[zd] + 300 <= W - 20;   // 300=内容卡实际最宽(~310 含徽章)，层级整体离屏右缘留 20px 呼吸
@@ -425,10 +440,14 @@ const sp = x => ({x, v: 0});
 const DUST = Array.from({length: 110}, (_, i) => ({a: i * 2.39996, v: .035 + (i * 37 % 100) / 100 * .06, o: (i * .618034) % 1, w: (i % 2 ? 1 : -1) * (.15 + (i % 7) * .05), s: .7 + (i % 5) * .32, b: .45 + (i % 3) * .25, c: T.dust[i % T.dust.length]}));
 // 光球与水母的视频逐帧画到 <canvas> 上显示：部分内置 / 嵌入式浏览器不合成 <video> 画面（解码正常但页面上是空的），
 // 画布在所有浏览器里都能显示。视频本身透明地留在原位负责播放；未加载好时先画封面图。
+// JX = -0.14：视频内容发光质心实测在画面 64% 处（偏右 14%），整体左移让本体落在元素几何中心——
+// inner 有 scaleX(-1) 镜像的水母也同时居中（内容在 canvas 内先偏移再被镜像，两个方向都归中）。
+// 染色 filter（hue-rotate/saturate/brightness）在绘制时套用：省掉 5 个常驻 GPU 滤镜合成层，颜色实现与 CSS filter 相同。
+const JX = -0.14;
 const posterCache = new Map();
 const posterOf = url => { if (!posterCache.has(url)) { const img = new Image(); img.src = url; posterCache.set(url, img); } return posterCache.get(url); };
 function paintVideo(pair) {
-  const {video, canvas} = pair;
+  const {video, canvas, filter} = pair;
   if (!video || !canvas) return;
   const cw = canvas.clientWidth, ch = canvas.clientHeight;
   if (!cw || !ch) return;
@@ -442,11 +461,12 @@ function paintVideo(pair) {
   const stamp = ready ? video.currentTime : -1;
   if (!resized && stamp === pair.stamp && ready === pair.ready) return;
   pair.stamp = stamp; pair.ready = ready;
-  // 等同 object-fit: cover
+  // 等同 object-fit: cover + 内容水平偏移
   const k = Math.max(W / sw0, H / sh0), sw = W / k, sh = H / k;
   const ctx = canvas.getContext('2d');
+  if (pair.appliedFilter !== filter) { ctx.filter = filter || 'none'; pair.appliedFilter = filter; }
   ctx.clearRect(0, 0, W, H);
-  ctx.drawImage(src, (sw0 - sw) / 2, (sh0 - sh) / 2, sw, sh, 0, 0, W, H);
+  ctx.drawImage(src, (sw0 - sw) / 2, (sh0 - sh) / 2, sw, sh, JX * W, 0, W, H);
 }
 
 const bez = (p0, p1, p2, p3, u) => { const m = 1 - u; return m * m * m * p0 + 3 * m * m * u * p1 + 3 * m * u * u * p2 + u * u * u * p3; };
@@ -458,7 +478,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   const itemRefs = useRef([]), fanRefs = useRef([]), fanPulseRefs = useRef([]);
   const aItemRefs = useRef([]), aThreadRefs = useRef([]), aThreadPulseRefs = useRef([]);
   const vids = useRef({});
-  const vidRef = (id, part) => el => { (vids.current[id] ||= {})[part] = el; };
+  const vidRef = (id, part, filter) => el => { const p = (vids.current[id] ||= {}); p[part] = el; if (filter) p.filter = filter; };
   const summaries = useMemo(() => Object.fromEntries(MODULES.map(m => [m.id, moduleSummary(graph, m)])), [graph]);
 
   useLayoutEffect(() => { live.current.fanStart = performance.now(); }, [items, live]);
@@ -473,10 +493,19 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       L.dt = dt;   // 供水母自由游弋物理积分（targets 内使用）
       if (!L.paused) L.time += dt;
       const t = L.time, since = (now - L.t0) / 1000;
-      // 鼠标吸引的缓速跟随点（低通滤波）：水母"缓慢跟着移动"的感觉来自这里，直接跟鼠标会显得机械
-      if (L.mx == null) { L.smx = null; }
-      else if (L.smx == null) { L.smx = L.mx; L.smy = L.my; }
-      else { const e = Math.min(1, dt * 2); L.smx += (L.mx - L.smx) * e; L.smy += (L.my - L.smy) * e; }
+      // 鼠标吸引的缓速跟随点（低通滤波）：水母"跟着移动"的感觉来自这里——直接跟鼠标会显得机械，
+      // 时间常数 ~0.14s（dt*7）：足够柔但慢拖时跟得上手（旧 dt*2 慢到吸不住）。
+      // smvx/smvy=跟随点的速度分量（再低通一层）：供追逐物理做前置预测与速度自适应
+      if (L.mx == null) { L.smx = null; L.smvx = L.smvy = 0; }
+      else if (L.smx == null) { L.smx = L.mx; L.smy = L.my; L.smvx = L.smvy = 0; }
+      else {
+        const e = Math.min(1, dt * 7);
+        const nx = L.smx + (L.mx - L.smx) * e, ny = L.smy + (L.my - L.smy) * e;
+        const ev = Math.min(1, dt * 4);
+        L.smvx += ((nx - L.smx) / Math.max(dt, 1e-4) - L.smvx) * ev;
+        L.smvy += ((ny - L.smy) / Math.max(dt, 1e-4) - L.smvy) * ev;
+        L.smx = nx; L.smy = ny;
+      }
       const T = targets(L, t);
       L.noteG = T.noteG || 1;   // 笔记模式整组缩放系数：水母标签同步缩放（文本框不缩会挤压且线条起点错位）
       if (T.fan) L.fanMeta = {panMax: T.fan.panMax || 0, n: L.items.length};
@@ -487,8 +516,9 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       L.orb = {x: ox, y: oy, s: os};
       if (orbRef.current) { orbRef.current.style.transform = `translate3d(${ox - os / 2}px,${oy - os / 2}px,0) scale(${os / 460})`; orbRef.current.style.opacity = clamp(oo, 0, 1); }
       const dust = dustRef.current;
-      if (dust) {
-        const di = clamp(spring(S.dust, L.stage === 'hub' ? .3 : 1, dt, 18), 0, 1);
+      L.fc = (L.fc || 0) + 1;   // 帧计数：尘埃=光球背景层，隔帧绘制（33fps，符合"前景60/背景33"节奏），停绘帧保留上一帧画面
+      if (dust && L.fc % 2 === 0) {
+        const di = clamp(spring(S.dust, L.stage === 'hub' ? .3 : 1, dt * 2, 18), 0, 1);
         const ctx = dust.getContext('2d');
         ctx.clearRect(0, 0, 1012, 1012);
         if (!L.reduced && di > .02) {
@@ -523,9 +553,22 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         let fv = fv0;
         if (!L.reduced && L.smx != null) { const ddx = L.smx - x, ddy = L.smy - y; const dd = Math.hypot(ddx, ddy); if (dd < 260) fv = Math.max(fv, (1 - dd / 260) * .6); }
         if (el) el.style.setProperty('--fl', fv.toFixed(3));
-        if (inner) inner.style.transform = `rotate(${tg.tilt}deg) scaleX(${MOD_STYLE[m.id].flip})`;
+        // 姿态=真实运动驱动：伞体收缩节律随游速加快（喷水推进感），被撞/撞边瞬间受惊收缩 0.6s，
+        // 升降映射轻微俯仰（scaleY）；静止时保留 ~1.8s 呼吸微脉动——不游也是活的
+        const fsp = Math.min(tg.spd || 0, 12);   // 脉动频率封顶（12px/s 以上同频），否则追逐高速时变成抽搐
+        const cfq = .55 + fsp * .09;
+        let ct = Math.pow(Math.sin(t * cfq * Math.PI + i * 1.3), 2) * clamp(.18 + fsp * .05, .2, .6);
+        const hAgo = tg.hit ? t - tg.hit : 9;
+        if (hAgo < .6) ct = Math.min(1, ct + (1 - hAgo / .6) * .8);
+        const pitch = clamp((tg.vy || 0) * .004, -.035, .035);
+        if (inner) inner.style.transform = `rotate(${tg.tilt}deg) scaleX(${MOD_STYLE[m.id].flip * (1 - .05 * ct)}) scaleY(${1 + .03 * ct - pitch})`;
         if (lab) {
-          const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
+          // 标签尺寸缓存：每帧读 offsetWidth=强制同步布局（帧率杀手），只在首次/标记脏时实测；
+          // 脏位由 resize 与字体加载置起，循环末统一清除
+          const SZ = L.labSz || (L.labSz = {});
+          let sz = SZ[m.id];
+          if (!sz || L.labDirty) sz = SZ[m.id] = {w: lab.offsetWidth, h: lab.offsetHeight};
+          const lw = sz.w, lh = sz.h, ng = L.noteG || 1;
           const hub = L.stage === 'hub', narrow = L.size.w < 760;
           // 标签统一放水母正下方（hub 同款）：不占右侧连线路径，触须直接从伞体右缘出发
           const lx = x - lw / 2;
@@ -610,6 +653,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           });
         }
       });
+      L.labDirty = false;   // 本帧已按需重测全部标签，脏位清除
       // 光标=黑洞视界：低通跟随点上的吸积双环+暗核，靠近任何水母时淡入（引力场可见）；
       // 同款空闲零开销——不可见且淡出完毕后不再写 DOM
       const gv = gravRef.current;
@@ -725,11 +769,12 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
     return () => cancelAnimationFrame(raf);
   }, [items, live, sel]);
 
-  // 暂停时一并暂停视频
+  // 暂停时一并暂停视频；字体加载完成后标签尺寸变化 → 置脏位重测（配合尺寸缓存）
   useEffect(() => {
     const sync = () => document.querySelectorAll('.scene video').forEach(v => { if (live.current.paused || live.current.reduced || document.hidden) v.pause(); else v.play().catch(() => {}); });
     live.current.syncVideo = sync; sync();
     document.addEventListener('visibilitychange', sync);
+    document.fonts?.ready?.then(() => { live.current.labDirty = true; });
     return () => document.removeEventListener('visibilitychange', sync);
   }, [live]);
 
@@ -737,7 +782,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   // 静态兜底位置：渲染帧（rAF）冻结时（如窗口被遮挡）各元素也按最终布局可见可点，正常时 rAF 接管动画
   const t0 = targets(live.current, 0);
   return <div className={`scene stage-${live.current.stage}`} ref={sceneRef}>
-    <div className="orb clickable" ref={orbRef} role="button" tabIndex={-1} aria-label="回到星图主页" title="回到星图主页"
+    <div className="orb clickable" ref={orbRef} role="button" tabIndex={-1} aria-label="回到星图主页"
       onClick={() => onHome()} onPointerEnter={() => { live.current.hover = 'core'; }} onPointerLeave={() => { live.current.hover = null; }}>
       <div className="orb-halo"/>
       <video className="vsrc" ref={vidRef('orb', 'video')} src={T.media.orb} poster={T.media.orbPoster} muted loop playsInline autoPlay preload="auto"/>
@@ -778,10 +823,10 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }}
           style={{'--mod': MOD_STYLE[m.id].color}}
           aria-label={`${m.title} ${m.en}，${sum.count} 条`}>
-          <div className="jelly-inner" ref={el => { innerRefs.current[m.id] = el; }} style={{filter: MOD_STYLE[m.id].filter}}>
-            <video className="vsrc" ref={vidRef(m.id, 'video')} src={T.media.jelly} poster={T.media.jellyPoster} muted loop playsInline autoPlay preload="auto"
+          <div className="jelly-inner" ref={el => { innerRefs.current[m.id] = el; }}>
+            <video className="vsrc" ref={vidRef(m.id, 'video', MOD_STYLE[m.id].filter)} src={T.media.jelly} poster={T.media.jellyPoster} muted loop playsInline autoPlay preload="auto"
               onLoadedMetadata={e => { e.currentTarget.currentTime = (MODULES.indexOf(m) * 1.37) % 6; }}/>
-            <canvas className="vid" ref={vidRef(m.id, 'canvas')}/>
+            <canvas className="vid" ref={vidRef(m.id, 'canvas', MOD_STYLE[m.id].filter)}/>
           </div>
         </button>
         <button className={`jelly-label ${active ? 'active' : ''} ${hub || live.current.size.w >= 760 ? 'below' : 'side'}`} ref={el => { labelRefs.current[m.id] = el; }} onClick={() => onModule(m.id)} tabIndex={-1}
@@ -1099,8 +1144,10 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     };
     calc();
     const t = setTimeout(calc, 900);   // 首帧后标题/字体定稿再复量一次
+    const markDirty = () => { live.current.labDirty = true; };   // 标签尺寸随窗口变化 → 置脏重测（配合尺寸缓存）
     window.addEventListener('resize', calc);
-    return () => { clearTimeout(t); window.removeEventListener('resize', calc); };
+    window.addEventListener('resize', markDirty);
+    return () => { clearTimeout(t); window.removeEventListener('resize', calc); window.removeEventListener('resize', markDirty); };
   }, []);
 
   return <section ref={stageRef} className={`home-stage stage-${stage} ${live.current.introSeen ? 'intro-done' : ''}`} aria-label="创作神经图谱">
