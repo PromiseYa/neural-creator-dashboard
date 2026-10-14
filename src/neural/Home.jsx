@@ -33,7 +33,7 @@ class TaskStatusFan extends React.Component {
     this.timer = setTimeout(() => {
       this.setState({open: false});
       this.untimer = setTimeout(() => this.setState({mounted: false}), 450);
-    }, 2000);
+    }, 1000);
   };
   render() {
     const {badge, task, onAction} = this.props;
@@ -41,7 +41,7 @@ class TaskStatusFan extends React.Component {
     const dx = 58;
     return <span className={`st-swap${this.state.open ? ' open' : ''}`} onClick={e => e.stopPropagation()} onPointerEnter={this.enter} onPointerLeave={this.leave}>
       <span className="fi-badge" style={{'--b': badge.color}}>{badge.text}</span>
-      {this.state.mounted && <svg className="st-svg" aria-hidden="true">
+      {this.state.mounted && <svg className="st-svg" viewBox="-2 -60 72 120" aria-hidden="true">
         {ops.map(([, target], k) => {
           const dy = (k - (ops.length - 1) / 2) * 28;                   // 四张卡垂直居中排开
           const d = `M2 0 C${dx * .55} 0 ${dx * .55} ${dy} ${dx - 8} ${dy}`;   // 与层别触须同款 S 形曲线
@@ -420,6 +420,13 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         j.cur = {x, y, s};
         const el = jellyRefs.current[m.id], inner = innerRefs.current[m.id], lab = labelRefs.current[m.id];
         if (el) { el.style.transform = `translate3d(${x - s / 2}px,${y - s * .375}px,0) scale(${s / 200})`; el.style.opacity = clamp(o, 0, 1); }
+        // 随机闪烁（生命感）：各自错峰的 1.1s 正弦脉冲，间隔 4~11s 随机；无障碍减弱动效时关闭
+        const FL = L.flash || (L.flash = {});
+        let fl = FL[m.id];
+        if (!fl) fl = FL[m.id] = {until: 0, next: t + 2 + Math.random() * 6};
+        if (!L.reduced && t >= fl.next) { fl.until = t + 1.1; fl.next = t + 4 + Math.random() * 7; }
+        const fv = !L.reduced && t < fl.until ? Math.sin((1 - (fl.until - t) / 1.1) * Math.PI) : 0;
+        if (el) el.style.setProperty('--fl', fv.toFixed(3));
         if (inner) inner.style.transform = `rotate(${tg.tilt}deg) scaleX(${MOD_STYLE[m.id].flip})`;
         if (lab) {
           const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
@@ -602,6 +609,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       return <React.Fragment key={m.id}>
         <button className={`jelly ${active ? 'active' : ''}`} ref={el => { jellyRefs.current[m.id] = el; }} onClick={() => onModule(m.id)}
           onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }}
+          style={{'--mod': MOD_STYLE[m.id].color}}
           aria-label={`${m.title} ${m.en}，${sum.count} 条`}>
           <div className="jelly-inner" ref={el => { innerRefs.current[m.id] = el; }} style={{filter: MOD_STYLE[m.id].filter}}>
             <video className="vsrc" ref={vidRef(m.id, 'video')} src={T.media.jelly} poster={T.media.jellyPoster} muted loop playsInline autoPlay preload="auto"
@@ -932,7 +940,7 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     <div className="hub-copy" aria-hidden={stage !== 'hub'}>
       <p className="eyebrow">{CONFIG.brand.name} · {CONFIG.brand.sub} <span>{CONFIG.brand.tagline}</span></p>
       <h1>人间有味是清欢。</h1>
-      <p className="hub-en">My ecosystem, rendered live.</p>
+      <p className="hub-en">The truest flavor of life is its quiet joys.</p>
       <p className="hub-meta">{MODULES.length} 个模块 <em>modules</em> · {s.content} 条内容 <em>notes</em> · {s.links} 条连接 <em>links</em></p>
       <p className="hub-hint">点击水母，展开模块 · <em>Tap a jellyfish to expand</em></p>
     </div>

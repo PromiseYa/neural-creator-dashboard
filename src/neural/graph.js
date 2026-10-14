@@ -243,17 +243,27 @@ export function forceLayout(graph) {
   const anchor = id => {
     const n = idx.get(id);
     if (n.kind === 'concept') return [0, -1];
-    // kb 分区子锚点(level 2)与 kb 笔记都归拢到知识库方向：形成右侧星云，
+    // kb 笔记与分区子锚不再全部归拢到知识库单点（会缩成远处一团，水母旁反而空）：
+    // 按各自分区在知识库方向 ±58° 弧上散开——每个分区一团星点，贴着知识库水母可见，
     // 与任务/拍板/记忆/服务各自水母方向的星群同构（无锚点时随机散布，看不出模块归属）
-    const fid = n.level === 2 || String(n.folder || '').startsWith('f:kb') ? 'f:kb' : n.folder;
-    const f = FOLDERS.find(x => x.id === fid) || FOLDERS.find(x => x.id === id);
-    return f ? [Math.cos(rad(f.angle)), Math.sin(rad(f.angle))] : null;
+    const f = n.folder || '';
+    if (n.level === 2 || f.startsWith('f:kb')) {
+      const kb = FOLDERS.find(x => x.id === 'f:kb');
+      const base = rad(kb.angle);
+      const zone = f === 'f:kb' ? id : f;   // 笔记→所在分区；分区锚点→自身
+      let h = 0; for (const c of String(zone)) h = (h * 131 + c.charCodeAt(0)) % 9973;
+      const ang = base + (h / 9973 - .5) * 116 * Math.PI / 180;
+      return [Math.cos(ang), Math.sin(ang), 1];   // 第三位=紧贴标记：kb 团贴近水母（半径 240~300，别飘远）
+    }
+    const fd = FOLDERS.find(x => x.id === f) || FOLDERS.find(x => x.id === id);
+    return fd ? [Math.cos(rad(fd.angle)), Math.sin(rad(fd.angle))] : null;
   };
   for (const n of all) {   // 初始化含 done 任务（弹簧段读它们的坐标，不初始化会 NaN 传染）
     const r = rng(n.id), a = anchor(n.id);
-    const R = n.kind === 'core' ? 0 : n.kind === 'folder' ? (n.level ? 300 : 210) : CONTENT.has(n.kind) ? 330 : 420;
+    const near = a && a[2];
+    const R = n.kind === 'core' ? 0 : n.kind === 'folder' ? (n.level ? 300 : 210) : CONTENT.has(n.kind) ? (near ? 250 : 330) : 420;
     const base = a ? Math.atan2(a[1], a[0]) : r() * Math.PI * 2;
-    const ang = base + (r() - .5) * (a ? 1.1 : 6.28);
+    const ang = base + (r() - .5) * (a ? (near ? .7 : 1.1) : 6.28);
     n.x = Math.cos(ang) * R * (0.8 + r() * .4); n.y = Math.sin(ang) * R * (0.8 + r() * .4); n.vx = 0; n.vy = 0;
   }
   const rest = {contain: 120, wiki: 95, source: 90, tag: 52, mention: 135, resonance: 170};
@@ -277,6 +287,7 @@ export function forceLayout(graph) {
     for (const n of N) {
       const a = anchor(n.id);
       if (n.kind === 'folder' && a) { const R = n.level ? 300 : 230; n.vx += (a[0] * R - n.x) * .04; n.vy += (a[1] * R - n.y) * .04; }
+      else if (a && a[2] && CONTENT.has(n.kind)) { n.vx += (a[0] * 265 - n.x) * .02; n.vy += (a[1] * 265 - n.y) * .02; }   // kb 团：中强引力贴水母
       else if (a && CONTENT.has(n.kind)) { n.vx += (a[0] * 380 - n.x) * .006; n.vy += (a[1] * 380 - n.y) * .006; }
       else if (a) { n.vx += (a[0] * 300 - n.x) * .004; n.vy += (a[1] * 300 - n.y) * .004; }
       n.vx -= n.x * .002; n.vy -= n.y * .002;
