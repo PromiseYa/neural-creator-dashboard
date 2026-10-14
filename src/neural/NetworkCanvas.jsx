@@ -46,7 +46,7 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
     const links = graph.links.filter(l => l.kind !== 'contain' && byId.has(l.a) && byId.has(l.b)).map((l, i) => ({l, A: byId.get(l.a), B: byId.get(l.b), seed: (i * 7919 % 997) / 997}));
     const sparks = Array.from({length: 90}, (_, i) => ({a: i / 90 * Math.PI * 2 + Math.sin(i * 12.9) * .3, v: .35 + (i * 37 % 100) / 100, s: 1 + (i * 13 % 7) / 3}));
 
-    // 标签收纳：默认只画目录锚点名；hover 某类时只补该类连接度前 12 的节点名，明细一律进水母面板看。
+    // 标签收纳：默认只画目录锚点名；hover 某类时只补该类连接度前 16 的节点名，明细一律进水母面板看。
     const labelDefault = new Set(graph.nodes.filter(n => n.kind === 'folder').map(n => n.id));
     const hoverLabels = new Map();
     for (const n of graph.nodes) {
@@ -54,7 +54,7 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
       hoverLabels.get(n.kind).push(n);
     }
     for (const [kind, list] of hoverLabels) {
-      hoverLabels.set(kind, new Set(list.sort((a, b) => (b.deg + b.mutual) - (a.deg + a.mutual)).slice(0, 12).map(n => n.id)));
+      hoverLabels.set(kind, new Set(list.sort((a, b) => (b.deg + b.mutual) - (a.deg + a.mutual)).slice(0, 16).map(n => n.id)));
     }
 
     // hover 高亮集合只在悬停对象变化时重建，不再每帧重算
@@ -106,7 +106,7 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         const p = Math.min(p1, p2) * grow;
         if (p <= .02) continue;
         const on = !hl || (hl.has(k.l.a) && hl.has(k.l.b));
-        let a = (k.l.both ? .32 : k.l.kind === 'wiki' ? .3 : k.l.kind === 'contain' ? .16 : .11) * p * (on ? 1 : .25) * (hl && on ? 2.2 : 1);
+        let a = (k.l.both ? .32 : k.l.kind === 'wiki' ? .3 : k.l.kind === 'contain' ? .16 : .11) * p * (on ? 1 : .18) * (hl && on ? 2.6 : 1);
         ctx.strokeStyle = k.l.both ? `rgba(${P.mutual},${a})` : k.l.kind === 'wiki' ? `rgba(${P.wiki},${a})` : `rgba(${P.link},${a})`;
         ctx.lineWidth = k.l.both ? .6 + Math.min(k.l.w, 6) * .22 : .7;
         ctx.beginPath(); ctx.moveTo(x1, y1);
@@ -143,8 +143,8 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         if (p <= 0) continue;
         const on = !hl || hl.has(x.n.id);
         const color = KINDS[x.n.kind].color;
-        const a = p * (on ? 1 : .22);
-        const r = x.r * (hl && on ? 1.35 : 1);
+        const a = p * (on ? 1 : .15);
+        const r = x.r * (hl && on ? 1.45 : 1);
         ctx.globalAlpha = a * .4; // 与原 P.glow（'#..66' ≈ 0.4）等效
         ctx.globalCompositeOperation = ADD;
         const GR = r * 5;
@@ -154,16 +154,19 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
         if (x.n.kind === 'ghost') { ctx.setLineDash([2, 2]); ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(px, py, r + 1, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
         else ctx.drawImage(orbSprite(color, P.light), px - r, py - r, r * 2, r * 2);
         if (L.stage === 'hub' && p > .9 && (x.n.kind === 'folder' || (hlLabel && hlLabel.has(x.n.id) && on))) {
-          ctx.globalAlpha = a * (x.n.kind === 'folder' ? .85 : .8);
-          ctx.fillStyle = P.label; ctx.font = `${x.n.kind === 'folder' ? 11.5 : 10.5}px -apple-system, "PingFang SC", sans-serif`;
+          ctx.globalAlpha = a * (x.n.kind === 'folder' ? .85 : .9);
+          ctx.fillStyle = P.label; ctx.font = `${x.n.kind === 'folder' ? 11.5 : 11.5}px -apple-system, "PingFang SC", sans-serif`;
+          ctx.shadowColor = 'rgba(0, 0, 0, .75)'; ctx.shadowBlur = 3;   // 悬停第二层信息标签：衬底微影，星光里也读得清
           ctx.fillText((x.n.short || x.n.title).slice(0, 14), px + r + 5, py + 3.5);
+          ctx.shadowBlur = 0;
         }
         ctx.globalAlpha = 1;
       }
     };
-    // 每帧先排好下一帧再绘制：某一帧出错也不会让背景网络停住
-    let warned = false;
-    const frame = now => { raf = requestAnimationFrame(frame); try { draw(now); } catch (err) { if (!warned) { warned = true; console.error(err); } } };
+    // 每帧先排好下一帧再绘制：某一帧出错也不会让背景网络停住；
+    // 星云整体 ~33fps 足够（星点/脉冲都是慢运动），把帧预算让给水母/光球的 60fps 丝滑
+    let warned = false, lastDraw = -1e9;
+    const frame = now => { raf = requestAnimationFrame(frame); if (now - lastDraw < 30) return; lastDraw = now; try { draw(now); } catch (err) { if (!warned) { warned = true; console.error(err); } } };
     raf = requestAnimationFrame(frame);
     return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, [graph, layout, live, reduced]);

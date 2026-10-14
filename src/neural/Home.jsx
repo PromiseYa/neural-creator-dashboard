@@ -232,10 +232,14 @@ export function targets(L, t) {
     const cy = narrow ? H * .47 : H * .53;
     res.orb = {x: W / 2, y: cy, s};
     const rx = narrow ? W * .36 : Math.min(W * .36, 540), ry = narrow ? H * .21 : Math.min(H * .32, 262);
+    // 大范围游弋：角度摆 ±10°（弧向行走）+ 径向 ±7% + 垂直起伏 14px，各水母相位错开；
+    // 再叠加鼠标吸引（限幅 34px，缓速跟随，不越过邻居间距）
     MODULES.forEach((m, i) => {
-      const a = (m.angle + swim * 7 * Math.sin(t * .17 + i * 1.7)) * Math.PI / 180;
-      const r = 1 + swim * .04 * Math.sin(t * .23 + i);
-      res.jelly[m.id] = {x: W / 2 + Math.cos(a) * rx * r, y: cy + Math.sin(a) * ry * r + swim * 9 * Math.sin(t * .9 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1, tilt: swim * 6 * Math.sin(t * .6 + i)};
+      const a = (m.angle + swim * 10 * Math.sin(t * .22 + i * 1.7)) * Math.PI / 180;
+      const r = 1 + swim * .07 * Math.sin(t * .3 + i);
+      const jj = {x: W / 2 + Math.cos(a) * rx * r, y: cy + Math.sin(a) * ry * r + swim * 14 * Math.sin(t * .8 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1, tilt: swim * 6 * Math.sin(t * .6 + i)};
+      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 300 && d > 2) { const f = (1 - d / 300) * 34; jj.x += dx / d * f; jj.y += dy / d * f; } }
+      res.jelly[m.id] = jj;
     });
   } else if (narrow) {
     res.orb = {x: 40, y: 156, s: 86};
@@ -251,8 +255,11 @@ export function targets(L, t) {
     const colX = ox + 158, gap = Math.min(122, (H - 150) / 5);
     MODULES.forEach((m, i) => {
       const sel = m.id === L.mod, k = slotOf(L.mod, m.id);
-      // 慢速左右摇摆漂浮（幅 9px / 周期约 24s，各水母相位错开）；选中的稍向右凸出
-      res.jelly[m.id] = {x: colX + (sel ? 16 : 0) + swim * 9 * Math.sin(t * .26 + i * 1.7), y: cy + (k - 2) * gap + swim * 5 * Math.sin(t * .9 + i * 2), s: sel ? 128 : 92, o: sel ? 1 : .6, tilt: swim * 3 * Math.sin(t * .6 + i)};
+      // 左右摇摆漂浮（幅 12px，选中水母也漂，触须有弹簧自然跟随）；上下起伏 9px；相位错开
+      const jj = {x: colX + (sel ? 16 : 0) + swim * 12 * Math.sin(t * .26 + i * 1.7), y: cy + (k - 2) * gap + swim * 9 * Math.sin(t * .9 + i * 2), s: sel ? 128 : 92, o: sel ? 1 : .6, tilt: swim * 3 * Math.sin(t * .6 + i)};
+      // 侧列鼠标吸引限幅 16px（列距 122，不给触须和标签制造交织）
+      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 240 && d > 2) { const f = (1 - d / 240) * 16; jj.x += dx / d * f; jj.y += dy / d * f; } }
+      res.jelly[m.id] = jj;
     });
     // 伞状条目以右侧分析栏为基准排在它左边约 90px 处（条目最宽约 270px），触须拉长、画面左右均衡；
     // 模块层和打开笔记后位置相同，右侧栏滑入时伞不跳动。
@@ -262,14 +269,10 @@ export function targets(L, t) {
     // 清单垂直间距全层统一 80px（分类层/清单层/深层一致，长清单靠滚轮平移）——
     // 自适应间距会让 2 张卡 120px、10 张 62px，层与层之间跳变=视觉混乱
     const fgap = 80;
-    // 扇形第一列贴水母标签右缘约 190px（与其他列 200px 间距一致）：
-    // 旧公式用 panelLeft 反推，宽屏会把清单推得离水母很远（视觉脱节）；详情面板让位交给笔记模式的整组缩放
-    const originX = colX + 16 + 176 + 12;
-    const fanBase = Math.min(originX + 190, panelLeft - 280);
     const selOpen = L.stage === 'note';
     // kb 目录钻取（宽屏）：每一层完整复刻"水母层"语法——选中卡调换到中间放大当该列主角（同选中水母居中），
     // 同层兄弟卡保持原尺寸、变暗排在上下（同未选水母 o=.6；深列放不下才缩），下一层在右侧下一个槽位
-    // 按原尺寸完整展开（同点知识库后生出的那层）；连线=上一列选中卡右缘→下一列各卡，逐列接棒。
+    // 按原尺寸完整展开（同点知识库后生出的那层）；连线=上一列选中卡右缘→下一层各卡，逐列接棒。
     // 打开笔记时：整个构图（光球+水母列+祖先列+文件列）作为同一刚体向左平移+整体缩小给详情页让位——
     // 结构原样、无人消失、无重排，ESC 原样放大还原。
     const zchain = L.zonePath || [];
@@ -277,6 +280,11 @@ export function targets(L, t) {
     const zd = Math.min(zdRaw, 2);
     // 列间距 240：卡宽约 200+触须空隙——间距 200 时上一列卡片右缘会压到下一列起点，
     // 触须被迫向左折回交织（核心服务→工作站那层"线条扭在一起"的根源）
+    // 钻取时第一列贴水母标签实际右缘 80px——与列间触须等长（160 卡 + 80 线 = 240 列距），
+    // 层与层的线条节奏完全统一；模块首页清单仍留 190 呼吸感（无第二层可比）
+    const originX = colX + 16 + 176 + 12;
+    const labRight = colX + 16 + 128 * .5 + 10 + (L.labW || 176);
+    const fanBase = zd ? Math.min(labRight + 80, panelLeft - 280) : Math.min(originX + 190, panelLeft - 280);
     const SX = [fanBase, fanBase + 240, fanBase + 480];
     const fit = !zd || SX[zd] + 270 <= W - 24;
     const span = Math.max(0, n - 1) * fgap;
@@ -384,6 +392,10 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       const dt = Math.max(0, Math.min(1 / 30, (now - last) / 1000)); last = Math.max(last, now);
       if (!L.paused) L.time += dt;
       const t = L.time, since = (now - L.t0) / 1000;
+      // 鼠标吸引的缓速跟随点（低通滤波）：水母"缓慢跟着移动"的感觉来自这里，直接跟鼠标会显得机械
+      if (L.mx == null) { L.smx = null; }
+      else if (L.smx == null) { L.smx = L.mx; L.smy = L.my; }
+      else { const e = Math.min(1, dt * 2); L.smx += (L.mx - L.smx) * e; L.smy += (L.my - L.smy) * e; }
       const T = targets(L, t);
       L.noteG = T.noteG || 1;   // 笔记模式整组缩放系数：水母标签同步缩放（文本框不缩会挤压且线条起点错位）
       if (T.fan) L.fanMeta = {panMax: T.fan.panMax || 0, n: L.items.length};
@@ -430,6 +442,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         if (inner) inner.style.transform = `rotate(${tg.tilt}deg) scaleX(${MOD_STYLE[m.id].flip})`;
         if (lab) {
           const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
+          if (m.id === L.mod) L.labW = lw;   // 记录选中水母标签实际宽度：钻取首列用它贴齐（层间线条等长）
           const hub = L.stage === 'hub', narrow = L.size.w < 760;
           // 侧列时标签放在水母右边缘之外再空 10px，触须不压标签；笔记模式整组缩放时标签同步缩放
           const lx = hub ? x - lw / 2 : narrow ? x - lw / 2 : x + s * .5 + 10;
@@ -502,7 +515,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           const p = aThreadRefs.current[k]?.[i];
           if (p && src) {
             const ey = y + 15 * sc, mx = (src.x + x) / 2;
-            p.setAttribute('d', `M${src.x},${src.y} C${mx},${src.y} ${mx},${ey} ${x - 4},${ey}`);
+            p.setAttribute('d', `M${src.x},${src.y} C${mx},${src.y} ${mx},${ey} ${x + 2},${ey}`);   // 终点插入卡内 2px，接住卡首圆点
             p.style.opacity = clamp(Math.min(o, src.o), 0, 1) * (tp.path ? .85 : .4);
             // 链线上的流动脉冲（与扇形触须同款）：水母→分类→内容 逐级接力，链路"活"起来
             const pc = aThreadPulseRefs.current[k]?.[i];
@@ -539,7 +552,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           if (p) {
             const dx = x - ox2, sway = L.reduced ? 0 : Math.sin(t * 1.1 + i * .7) * 7;
             const c1x = ox2 + dx * .5, c1y = oy2 + sway, c2x = x - dx * .45, c2y = y - sway * .5;
-            p.setAttribute('d', `M${ox2},${oy2} C${c1x},${c1y} ${c2x},${c2y} ${x},${y}`);
+            p.setAttribute('d', `M${ox2},${oy2} C${c1x},${c1y} ${c2x},${c2y} ${x + 2},${y}`);   // 终点插入卡内，接住卡首圆点
             const on = sel === n.id;
             p.style.opacity = clamp(o, 0, 1) * (sel ? (on ? 1 : .35) : .8);
             p.style.strokeWidth = on ? 1.8 : 1;
@@ -840,12 +853,18 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     const onTouchEnd = () => { touchPt = null; };
     el.addEventListener('touchmove', onTouchMove, {passive: false});
     el.addEventListener('touchend', onTouchEnd);
-    // 记录光标位置：键盘上下键按光标悬停区域路由（信息栏=滚面板/画布=平移清单）。
+    // 记录光标位置：键盘上下键按光标悬停区域路由（信息栏=滚面板/画布=平移清单）；
+    // 同时记录场景内坐标（L.mx/my）供水母鼠标吸引使用，离开场景即清（水母游回原位）。
     // 鼠标按住拖拽平移已按用户要求移除（劫持 mousedown 干扰点击与下拉交互），平移走滚轮、键盘、触屏单指。
-    const onMouseMove = e => { live.current.cursor = {x: e.clientX, y: e.clientY}; };
+    let sceneRect = null;
+    const onMouseMove = e => { const L = live.current; L.cursor = {x: e.clientX, y: e.clientY};
+      if (!sceneRect) sceneRect = el.getBoundingClientRect();
+      L.mx = e.clientX - sceneRect.left; L.my = e.clientY - sceneRect.top; };
+    const onSceneLeave = () => { live.current.mx = null; sceneRect = null; };
     window.addEventListener('mousemove', onMouseMove);
+    el.addEventListener('pointerleave', onSceneLeave);
     return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('touchmove', onTouchMove); el.removeEventListener('touchend', onTouchEnd);
-      window.removeEventListener('mousemove', onMouseMove); };
+      window.removeEventListener('mousemove', onMouseMove); el.removeEventListener('pointerleave', onSceneLeave); };
   }, []);
   useEffect(() => {
     const key = e => {
