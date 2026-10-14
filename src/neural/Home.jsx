@@ -256,7 +256,7 @@ export function targets(L, t) {
       return {x: W / 2 + Math.cos(a) * rx * rr, y: cy + Math.sin(a) * ry * rr};
     });
     const js = MODULES.map((m, i) => {
-      const rm = RM[m.id] || (RM[m.id] = {x: 0, y: 0, vx: 4, vy: 0, ang: Math.random() * 6.28, spd: 6, turnAt: 0, targetAng: 0, targetSpd: 7});
+      const rm = RM[m.id] || (RM[m.id] = {x: 0, y: 0, vx: 4, vy: 0, ang: Math.random() * 6.28, spd: 6, turnAt: 0, targetAng: 0, targetSpd: 7, hitAt: 0});
       if (swim) {
         if (t >= rm.turnAt) { rm.turnAt = t + 3.5 + Math.random() * 5.5; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 4 + Math.random() * 9; }   // 随机掉头
         let da = rm.targetAng - rm.ang; da = Math.atan2(Math.sin(da), Math.cos(da));
@@ -268,30 +268,34 @@ export function targets(L, t) {
         const dHome = Math.hypot(rm.x, rm.y);   // 远超 600px 才有极弱归心（防集体漂到一侧，平时感知不到）
         if (dHome > 600) { rm.x -= rm.x / dHome * (dHome - 600) * dt * .5; rm.y -= rm.y / dHome * (dHome - 600) * dt * .5; }
       }
-      return {rm, bx: base[i].x, by: base[i].y};
+      return {rm, bx: base[i].x, by: base[i].y, id: m.id};
     });
-    js.forEach(({rm, bx, by}) => {   // 边界反弹（按绝对位置）
-      const ax = bx + rm.x, ay = by + rm.y;
-      if (ax < 100) { rm.x = 100 - bx; rm.vx = Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
-      if (ax > W - 100) { rm.x = W - 100 - bx; rm.vx = -Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
-      if (ay < 90) { rm.y = 90 - by; rm.vy = Math.abs(rm.vy); rm.ang = -rm.ang; }
-      if (ay > H - 90) { rm.y = H - 90 - by; rm.vy = -Math.abs(rm.vy); rm.ang = -rm.ang; }
+    const LB = L.labSz || (L.labSz = {});   // 标签实测尺寸缓存（step 每帧写入），反弹边界含文字
+    const ocx = W / 2, ocy = cy, jsz = narrow ? 92 : clamp(W * .12, 120, 184);
+    js.forEach(j => {   // 边界反弹（按绝对位置）：余量=伞体半径与标签半宽取大，上=伞顶，下=标签底——头部和文字都不出屏
+      const {rm, id} = j, s = jsz, lb = LB[id] || {w: 132, h: 56};
+      const ax = j.bx + rm.x, ay = j.by + rm.y;
+      const mSide = Math.max(s * .45, lb.w / 2) + 10, mTop = s * .375 + 8, mBot = s * .36 + lb.h + 10;
+      if (ax < mSide) { rm.x = mSide - j.bx; rm.vx = Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; rm.hitAt = t; }
+      if (ax > W - mSide) { rm.x = W - mSide - j.bx; rm.vx = -Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; rm.hitAt = t; }
+      if (ay < mTop) { rm.y = mTop - j.by; rm.vy = Math.abs(rm.vy); rm.ang = -rm.ang; rm.hitAt = t; }
+      if (ay > H - mBot) { rm.y = H - mBot - j.by; rm.vy = -Math.abs(rm.vy); rm.ang = -rm.ang; rm.hitAt = t; }
     });
-    for (let i = 0; i < js.length; i++) for (let k = i + 1; k < js.length; k++) {   // 成对相撞：互换法向速度+位置各退一半重叠
+    for (let i = 0; i < js.length; i++) for (let k = i + 1; k < js.length; k++) {   // 成对相撞（椭圆判定：水平含标签半宽，垂直按伞体）互换法向速度+位置分离
       const A = js[i], B = js[k];
       const dx = (A.bx + A.rm.x) - (B.bx + B.rm.x), dy = (A.by + A.rm.y) - (B.by + B.rm.y);
-      const d = Math.hypot(dx, dy), minD = 150;
-      if (d > 0.01 && d < minD) {
-        const nx = dx / d, ny = dy / d, push = (minD - d) / 2;
-        A.rm.x += nx * push; A.rm.y += ny * push; B.rm.x -= nx * push; B.rm.y -= ny * push;
+      const rx = jsz * .42 + ((LB[A.id] || {w: 132}).w + (LB[B.id] || {w: 132}).w) * .31, ry = jsz * .62 + 8;
+      const nx0 = dx / rx, ny0 = dy / ry, dd = Math.hypot(nx0, ny0);
+      if (dd > 0.01 && dd < 1) {
+        const nx = nx0 / dd, ny = ny0 / dd, push = (1 - dd) / 2;
+        A.rm.x += nx * push * rx; A.rm.y += ny * push * ry; B.rm.x -= nx * push * rx; B.rm.y -= ny * push * ry;
         const dv = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
-        if (dv < 0) { A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv; }   // 仅相互接近时弹开
+        if (dv < 0) { A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv; A.rm.hitAt = t; B.rm.hitAt = t; }   // 仅相互接近时弹开
       }
     }
     // 主神经（光球↔各水母的神经丝）也是实体：游进别的神经丝走廊=被碰到——沿法线弹出+速度反射，
     // 并把漫游目标角刷新到反弹方向（否则转向加速度会立刻把它压回神经丝上反复蹭线）；
     // 自己的神经丝终点在自己身上，跳过。神经丝画的是微弯贝塞尔，直线段近似误差 ≤13px 在碰撞阈值内
-    const ocx = W / 2, ocy = cy, jsz = narrow ? 92 : clamp(W * .12, 120, 184);
     const abs = js.map(({rm, bx, by}) => [bx + rm.x, by + rm.y]);
     for (let i = 0; i < js.length; i++) {
       const rm = js[i].rm;
@@ -301,12 +305,12 @@ export function targets(L, t) {
         const ux = ex / elen, uy = ey / elen;
         const proj = clamp((abs[i][0] - ocx) * ux + (abs[i][1] - ocy) * uy, 0, elen);   // 线上最近点（含两端）
         const px = ocx + ux * proj, py = ocy + uy * proj;
-        const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .48 + 12;
+        const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .48 + 20;
         if (d > 0.01 && d < minD) {
           const nx = dx / d, ny = dy / d, push = minD - d;
           rm.x += nx * push; rm.y += ny * push; abs[i][0] += nx * push; abs[i][1] += ny * push;
           const vn = rm.vx * nx + rm.vy * ny;
-          if (vn < 0) { rm.vx -= 2 * vn * nx; rm.vy -= 2 * vn * ny; rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; }
+          if (vn < 0) { rm.vx -= 2 * vn * nx; rm.vy -= 2 * vn * ny; rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; rm.hitAt = t; rm.spd = Math.max(rm.spd, 9); }   // 反弹+受惊收缩+弹开提速
         }
       }
     }
