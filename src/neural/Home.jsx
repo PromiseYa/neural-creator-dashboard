@@ -281,11 +281,10 @@ export function targets(L, t) {
     const zd = Math.min(zdRaw, 2);
     // 列间距 240：卡宽约 200+触须空隙——间距 200 时上一列卡片右缘会压到下一列起点，
     // 触须被迫向左折回交织（核心服务→工作站那层"线条扭在一起"的根源）
-    // 钻取时第一列贴水母标签实际右缘 80px——与列间触须等长（160 卡 + 80 线 = 240 列距），
-    // 层与层的线条节奏完全统一；模块首页清单仍留 190 呼吸感（无第二层可比）
-    const originX = colX + 16 + 176 + 12;
+    // 全层级统一以水母标签实际右缘起 80px 线：分类卡层/钻取层/列间全部等长——
+    // 各模块标签宽窄不一（服务舱最窄），从固定常量起线会把首层拉到 168~124 不等，肉眼可见不齐
     const labRight = colX + 16 + 128 * .5 + 10 + (L.labW || 176);
-    const fanBase = zd ? Math.min(labRight + 80, panelLeft - 280) : Math.min(originX + 190, panelLeft - 280);
+    const fanBase = Math.min(labRight + 80, panelLeft - 280);
     const SX = [fanBase, fanBase + 240, fanBase + 480];
     const fit = !zd || SX[zd] + 270 <= W - 24;
     const span = Math.max(0, n - 1) * fgap;
