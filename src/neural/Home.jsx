@@ -245,14 +245,56 @@ export function targets(L, t) {
     const cy = narrow ? H * .47 : H * .53;
     res.orb = {x: W / 2, y: cy, s};
     const rx = narrow ? W * .36 : Math.min(W * .36, 540), ry = narrow ? H * .21 : Math.min(H * .32, 262);
-    // 大范围游弋：角度摆 ±10°（弧向行走）+ 径向 ±7% + 垂直起伏 14px，各水母相位错开；
-    // 再叠加鼠标吸引（限幅 34px，缓速跟随，不越过邻居间距）
-    MODULES.forEach((m, i) => {
+    // 自由游弋（宽屏 hub）：摆脱"钉在椭圆上小幅摆动"——每只水母带独立速度慢速漫游，
+    // 方向随机掉头（不会一直一个方向）、屏幕边界反弹、成对相撞互换法向速度弹开；
+    // 头与触手随移动方向倾倒，被光标吸引时头转向光标（atan2(dx,-dy)：光标正上方=0°不歪头）
+    const dt = Math.min(L.dt || 0, .05);
+    const RM = L.roam || (L.roam = {});
+    const base = MODULES.map((m, i) => {
       const a = (m.angle + swim * 10 * Math.sin(t * .22 + i * 1.7)) * Math.PI / 180;
-      const r = 1 + swim * .07 * Math.sin(t * .3 + i);
-      const jj = {x: W / 2 + Math.cos(a) * rx * r, y: cy + Math.sin(a) * ry * r + swim * 14 * Math.sin(t * .8 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1, tilt: swim * 6 * Math.sin(t * .6 + i)};
-      // 黑洞式吸引：越近拉力越陡（u^1.8），水母同时缩小、朝光标倾倒——被引力场缓缓吞入的错觉
-      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 300 && d > 2) { const u = 1 - d / 300; const f = Math.pow(u, 1.8) * 34; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .22; jj.tilt += Math.max(-12, Math.min(12, Math.atan2(dy, dx) * 180 / Math.PI * u * .3)); } }
+      const rr = 1 + swim * .07 * Math.sin(t * .3 + i);
+      return {x: W / 2 + Math.cos(a) * rx * rr, y: cy + Math.sin(a) * ry * rr};
+    });
+    const js = MODULES.map((m, i) => {
+      const rm = RM[m.id] || (RM[m.id] = {x: 0, y: 0, vx: 4, vy: 0, ang: Math.random() * 6.28, spd: 6, turnAt: 0, targetAng: 0, targetSpd: 7});
+      if (swim) {
+        if (t >= rm.turnAt) { rm.turnAt = t + 3.5 + Math.random() * 5.5; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 4 + Math.random() * 9; }   // 随机掉头
+        let da = rm.targetAng - rm.ang; da = Math.atan2(Math.sin(da), Math.cos(da));
+        rm.ang += clamp(da, -1.1 * dt, 1.1 * dt);   // 受限角速度=转弯柔和
+        rm.spd += (rm.targetSpd - rm.spd) * Math.min(1, dt * .5);
+        rm.vx += (Math.cos(rm.ang) * rm.spd - rm.vx) * Math.min(1, dt * .8);
+        rm.vy += (Math.sin(rm.ang) * rm.spd * .45 - rm.vy) * Math.min(1, dt * .8);
+        rm.x += rm.vx * dt; rm.y += rm.vy * dt;
+        const dHome = Math.hypot(rm.x, rm.y);   // 远超 600px 才有极弱归心（防集体漂到一侧，平时感知不到）
+        if (dHome > 600) { rm.x -= rm.x / dHome * (dHome - 600) * dt * .5; rm.y -= rm.y / dHome * (dHome - 600) * dt * .5; }
+      }
+      return {rm, bx: base[i].x, by: base[i].y};
+    });
+    js.forEach(({rm, bx, by}) => {   // 边界反弹（按绝对位置）
+      const ax = bx + rm.x, ay = by + rm.y;
+      if (ax < 100) { rm.x = 100 - bx; rm.vx = Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
+      if (ax > W - 100) { rm.x = W - 100 - bx; rm.vx = -Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
+      if (ay < 90) { rm.y = 90 - by; rm.vy = Math.abs(rm.vy); rm.ang = -rm.ang; }
+      if (ay > H - 90) { rm.y = H - 90 - by; rm.vy = -Math.abs(rm.vy); rm.ang = -rm.ang; }
+    });
+    for (let i = 0; i < js.length; i++) for (let k = i + 1; k < js.length; k++) {   // 成对相撞：互换法向速度+位置各退一半重叠
+      const A = js[i], B = js[k];
+      const dx = (A.bx + A.rm.x) - (B.bx + B.rm.x), dy = (A.by + A.rm.y) - (B.by + B.rm.y);
+      const d = Math.hypot(dx, dy), minD = 150;
+      if (d > 0.01 && d < minD) {
+        const nx = dx / d, ny = dy / d, push = (minD - d) / 2;
+        A.rm.x += nx * push; A.rm.y += ny * push; B.rm.x -= nx * push; B.rm.y -= ny * push;
+        const dv = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
+        if (dv < 0) { A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv; }   // 仅相互接近时弹开
+      }
+    }
+    MODULES.forEach((m, i) => {
+      const {rm, bx, by} = js[i];
+      const jj = {x: bx + rm.x, y: by + rm.y + swim * 14 * Math.sin(t * .8 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1,
+        tilt: swim * 4 * Math.sin(t * .6 + i) + clamp(rm.vx * 1.4, -16, 16)};   // 头随移动方向倾倒
+      // 黑洞式吸引：越近拉力越陡（u^1.8），水母缩小、头转向光标——被引力场缓缓吞入的错觉
+      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 300 && d > 2) { const u = 1 - d / 300; const f = Math.pow(u, 1.8) * 34; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .22; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .4, -18, 18); } }
+      jj.tilt = clamp(jj.tilt, -26, 26);
       res.jelly[m.id] = jj;
     });
   } else if (narrow) {
@@ -270,9 +312,9 @@ export function targets(L, t) {
     MODULES.forEach((m, i) => {
       const sel = m.id === L.mod, k = slotOf(L.mod, m.id);
       // 左右摇摆漂浮（幅 12px，选中水母也漂，触须有弹簧自然跟随）；上下起伏 9px；相位错开
-      const jj = {x: colX + (sel ? 16 : 0) + swim * 12 * Math.sin(t * .26 + i * 1.7), y: cy + (k - 2) * gap + swim * 9 * Math.sin(t * .9 + i * 2), s: sel ? 128 : 92, o: sel ? 1 : .6, tilt: swim * 3 * Math.sin(t * .6 + i)};
-      // 侧列同款黑洞吸引（温和版）：拉力 u^1.4 限 16px，缩小 12%，倾倒 ±8°——列距 122 内不交织
-      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 240 && d > 2) { const u = 1 - d / 240; const f = Math.pow(u, 1.4) * 16; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .12; jj.tilt += Math.max(-8, Math.min(8, Math.atan2(dy, dx) * 180 / Math.PI * u * .2)); } }
+      const jj = {x: colX + (sel ? 16 : 0) + swim * 12 * Math.sin(t * .26 + i * 1.7), y: cy + (k - 2) * gap + swim * 9 * Math.sin(t * .9 + i * 2), s: sel ? 128 : 92, o: sel ? 1 : .6, tilt: swim * 3 * Math.sin(t * .6 + i) + swim * 4 * Math.cos(t * .26 + i * 1.7)};   // 末项=头随横摆方向倾倒
+      // 侧列同款黑洞吸引（温和版）：拉力 u^1.4 限 16px，缩小 12%，头转向光标（与 hub 同款 atan2(dx,-dy)）
+      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 240 && d > 2) { const u = 1 - d / 240; const f = Math.pow(u, 1.4) * 16; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .12; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .3, -12, 12); } }
       res.jelly[m.id] = jj;
     });
     // 伞状条目以右侧分析栏为基准排在它左边约 90px 处（条目最宽约 270px），触须拉长、画面左右均衡；
@@ -292,15 +334,14 @@ export function targets(L, t) {
     const zchain = L.zonePath || [];
     const zdRaw = zchain.length > 1 ? zchain.length - 1 : 0;   // kb 与 services 都走层级链（zonePath 只有这两个模块有值）
     const zd = Math.min(zdRaw, 2);
-    // 列间距 240：卡宽约 200+触须空隙——间距 200 时上一列卡片右缘会压到下一列起点，
-    // 触须被迫向左折回交织（核心服务→工作站那层"线条扭在一起"的根源）
-    // 全层级统一以水母标签实际右缘起 80px 线：分类卡层/钻取层/列间全部等长——
-    // 各模块标签宽窄不一（服务舱最窄），从固定常量起线会把首层拉到 168~124 不等，肉眼可见不齐。
-    // 右缘用当帧水母真实位置（含游弋漂移）——列跟水母同组微漂，线长恒定不随漂移相位摆动
-    // （锚死列位时水母 ±12px 慢摆会让瞬时线长 64~88 跳变，跨模块对比即"忽长忽短"）
-    const sjx = L.mod && res.jelly[L.mod] ? res.jelly[L.mod].x : colX + 16;
-    const labRight = sjx + 128 * .5 + 10 + (L.labW || 176);
-    const fanBase = Math.min(labRight + 80, panelLeft - 280);
+    // 列间距 240：卡宽 160+触须空隙——间距不足时上一列卡片右缘压到下一列起点，
+    // 触须被迫向左折回交织（核心服务→工作站那层"线条扭在一起"的根源）。
+    // 水母层→首列与其他层同节奏：标签移到水母正下方（不占连线路径），触须从伞体右缘+6px 出发，
+    // 伞体右缘 → 首列 = 80px（76 线）——不再隔着一个 132~176px 宽的标签（旧观感总间距 ~286px）。
+    // 锚点用当帧水母真实位置（含游弋漂移）——列跟水母同组微漂，线长恒定
+    const sjx = L.mod && res.jelly[L.mod] ? res.jelly[L.mod] : null;
+    const bodyRight = (sjx ? sjx.x : colX + 16) + (sjx ? sjx.s : 128) * .5;
+    const fanBase = Math.min(bodyRight + 80, panelLeft - 280);
     const SX = [fanBase, fanBase + 240, fanBase + 480];
     const fit = !zd || SX[zd] + 300 <= W - 20;   // 300=内容卡实际最宽(~310 含徽章)，层级整体离屏右缘留 20px 呼吸
     const span = Math.max(0, n - 1) * fgap;
@@ -407,6 +448,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       const L = live.current;
       // rAF 给的是帧开始时间，可能早于上面记录的 last；负的 dt 会让后续计算出现 NaN，所以限制为 ≥ 0
       const dt = Math.max(0, Math.min(1 / 30, (now - last) / 1000)); last = Math.max(last, now);
+      L.dt = dt;   // 供水母自由游弋物理积分（targets 内使用）
       if (!L.paused) L.time += dt;
       const t = L.time, since = (now - L.t0) / 1000;
       // 鼠标吸引的缓速跟随点（低通滤波）：水母"缓慢跟着移动"的感觉来自这里，直接跟鼠标会显得机械
@@ -462,15 +504,14 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         if (inner) inner.style.transform = `rotate(${tg.tilt}deg) scaleX(${MOD_STYLE[m.id].flip})`;
         if (lab) {
           const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
-          if (m.id === L.mod) L.labW = lw;   // 记录选中水母标签实际宽度：钻取首列用它贴齐（层间线条等长）
           const hub = L.stage === 'hub', narrow = L.size.w < 760;
-          // 侧列时标签放在水母右边缘之外再空 10px，触须不压标签；笔记模式整组缩放时标签同步缩放
-          const lx = hub ? x - lw / 2 : narrow ? x - lw / 2 : x + s * .5 + 10;
-          const ly = hub ? y + s * .36 : narrow ? y + s * .36 : y - lh / 2;
+          // 标签统一放水母正下方（hub 同款）：不占右侧连线路径，触须直接从伞体右缘出发
+          const lx = x - lw / 2;
+          const ly = y + s * .36;
           lab.style.transformOrigin = 'left center';
           lab.style.transform = `translate3d(${lx}px,${ly}px,0) scale(${ng})`;
           lab.style.opacity = clamp(narrow && !hub && m.id !== L.mod ? 0 : lo, 0, 1);
-          j.label = {x: lx, y: ly, w: lw * ng, h: lh * ng};   // w/h 记缩放后的视觉宽：连线起点才不会错位
+          j.label = {x: lx, y: ly, w: lw * ng, h: lh * ng};   // w/h 记缩放后的视觉宽
         }
         // —— 光标引力可见化：位移吸引在 targets 里已算好，这里按弹簧后的真实位置重算拉力强度，
         // 驱动三层特效——水母伞缘水波纹（拉得越强纹越密）、吸入光丝（光点漂向光标）、光标吸积环 ——
@@ -575,7 +616,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         if (!st) { st = {x: sp(sx), y: sp(sy), s: sp(ss), o: sp(0), seen: false}; vis.set(id, st); }
         return st;
       };
-      let feed = sj?.label ? {x: sj.label.x + sj.label.w + 6, y: sj.cur.y, o: 1} : null;   // 当前列的喂养源：一路接棒到最深祖先列的选中卡
+      let feed = sj?.cur ? {x: sj.cur.x + sj.cur.s * .5 + 6, y: sj.cur.y, o: 1} : null;   // 当前列的喂养源=伞体右缘：一路接棒到最深祖先列的选中卡
       (T.acols || []).forEach((col, k) => {
         const cards = ancLevels[k];
         if (!cards) return;
@@ -615,7 +656,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       // 选中模块 → 多篇笔记（触须式扇形展开）；kb 钻取时触须从最深祖先列的"钻入卡"右缘长出
       if (T.fan && sj?.label) {
         const narrow = L.size.w < 760;
-        let ox2 = narrow ? sj.label.x + sj.label.w / 2 : sj.label.x + sj.label.w + 6, oy2 = narrow ? sj.label.y + sj.label.h + 4 : sj.cur.y;
+        let ox2 = narrow ? sj.label.x + sj.label.w / 2 : sj.cur.x + sj.cur.s * .5 + 6, oy2 = narrow ? sj.label.y + sj.label.h + 4 : sj.cur.y;
         if (T.acols && feed && feed.o > .5) { ox2 = feed.x; oy2 = feed.y; }   // 钻取时触须从最深祖先列选中卡右缘长出（线条连接对应的文本框）
         items.forEach((n, i) => {
           const st = cardState(n.id, ox2, oy2, T.fan.scale || 1);
@@ -721,7 +762,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
             <canvas className="vid" ref={vidRef(m.id, 'canvas')}/>
           </div>
         </button>
-        <button className={`jelly-label ${active ? 'active' : ''} ${hub ? 'below' : 'side'}`} ref={el => { labelRefs.current[m.id] = el; }} onClick={() => onModule(m.id)} tabIndex={-1}
+        <button className={`jelly-label ${active ? 'active' : ''} ${hub || live.current.size.w >= 760 ? 'below' : 'side'}`} ref={el => { labelRefs.current[m.id] = el; }} onClick={() => onModule(m.id)} tabIndex={-1}
           onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }} style={{'--mod': MOD_STYLE[m.id].color}}>
           <span className="jl-icon"><Icon name={m.icon} size={14}/></span>
           <span className="jl-count">{sum.count}</span>
