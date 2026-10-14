@@ -117,6 +117,7 @@ function App() {
           vv.open_tasks, vv.pending_decisions, vv.workers_ok, vv.workers_late, vv.workers_down]);
         if (sig === ecoSigRef.current) return;
         ecoSigRef.current = sig;
+        window.__RC = (window.__RC || 0) + 1; window.__RC_AT = performance.now();   // ⚠临时诊断：真·重算计数，诊断完随浮层一起删
         setEco(e);
       } catch { /* 单次失败保静默，下轮再试 */ }
     };
@@ -243,20 +244,23 @@ createRoot(document.getElementById('root')).render(<App/>);
 // 浏览器窗口模式无任务栏遮挡不受影响
 if (window.chrome?.webview) document.body.classList.add('wallpaper-mode');
 
-// FPS 诊断浮层（?fps=1 开启）：量化"卡不卡"——实时帧率/超 20ms 帧占比/最差帧耗时；
-// 不带参数时零开销，平时不渲染
-if (new URLSearchParams(location.search).get('fps')) {
+// ⚠临时诊断浮层（无条件渲染，定位"一卡一卡"；定位后还原 ?fps=1 门控并删 __RC 计数）：
+// fps/超时帧/最差帧 + 长任务（>50ms 主线程阻塞）计数 + 真·重算（setEco）计数与距今秒数
+{
   const el = document.createElement('div');
   el.className = 'fps-badge';
   document.body.appendChild(el);
   let n = 0, slow = 0, worst = 0, t0 = performance.now(), last = t0;
+  let ltN = 0, ltLast = 0;
+  try { new PerformanceObserver(list => { for (const e of list.getEntries()) { ltN++; ltLast = Math.round(e.duration); } }).observe({entryTypes: ['longtask']}); } catch {}
   const tick = now => {
     requestAnimationFrame(tick);
     const dt = now - last; last = now; n++;
     if (dt > 20) slow++;
     if (dt < 2000 && dt > worst) worst = dt;
     if (now - t0 >= 1000) {
-      el.textContent = `${Math.round(n * 1000 / (now - t0))} fps · 超时帧 ${Math.round(slow / n * 100)}% · 最差 ${Math.round(worst)}ms`;
+      const rcAt = window.__RC_AT ? Math.round((now - window.__RC_AT) / 1000) : -1;
+      el.textContent = `${Math.round(n * 1000 / (now - t0))} fps · 超时${Math.round(slow / n * 100)}% · 最差${Math.round(worst)}ms · 长任务${ltN}次/${ltLast}ms · 重算${window.__RC || 0}次(${rcAt}s前)`;
       n = 0; slow = 0; worst = 0; t0 = now;
     }
   };
