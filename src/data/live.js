@@ -17,10 +17,17 @@ async function alive(url) {
 
 export const STATUS_ZH = {pending: '待办', dispatched: '已派', doing: '进行中', waiting_confirm: '待确认', review: '待复核'};
 
-// WebView2 宿主通知（壁纸模式中文输入的关键）：input 聚焦时让 LivelyMod 播放器把窗口提到前台，
-// 系统输入法（IME）才能挂上、键盘走真实投递（不再走 PostMessage 转发，双字母同根除）；
-// 普通浏览器里 window.chrome.webview 不存在，静默无副作用。
-export const wvFocus = () => { try { window.chrome?.webview?.postMessage('star-input-focus'); } catch {} };
+// WebView2 宿主通知（壁纸模式中文输入的关键）：input 聚焦时把输入框的屏幕矩形（设备像素）发给
+// LivelyMod 播放器，播放器在原地浮一个原生输入框——原生窗口拿真实前台，系统输入法（IME）挂得上，
+// 中文可输；普通浏览器里 window.chrome.webview 不存在，静默无副作用。
+export const wvFocus = el => { try {
+  const w = window.chrome?.webview; if (!w) return;
+  if (el && el.getBoundingClientRect) {
+    const r = el.getBoundingClientRect();
+    const k = (window.screen.width || window.innerWidth) / Math.max(window.innerWidth, 1);   // CSS px → 设备 px
+    w.postMessage(JSON.stringify({type: 'star-input-focus', x: Math.round(r.x * k), y: Math.round(r.y * k), w: Math.round(r.width * k), h: Math.round(r.height * k)}));
+  } else w.postMessage('star-input-focus');
+} catch {} };
 export const wvBlur = () => { try { window.chrome?.webview?.postMessage('star-input-blur'); } catch {} };
 
 // 一次全量拉取：工作站实体 + KB 现场 + memorycore 状态 + 核心服务探测 + 累计完成任务（vite 只读直查 hub.db）。

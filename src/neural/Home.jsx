@@ -14,39 +14,53 @@ export const MOD_STYLE = Object.fromEntries(Object.entries(T.modules).map(([id, 
 export const split = n => ({out: n.out - n.mutual, back: n.in - n.mutual, both: n.mutual});
 const fmt = v => v == null ? '—' : Number(v).toLocaleString('zh-CN');
 
-// 任务状态快捷切换：悬停徽章 → 五张状态小卡在右侧垂直依次弹出（同"下一层清单"语法，逐个生长）；
-// 鼠标移开 2 秒后才逐渐收起（有空隙可穿行），悬停期间锁定不消失；点选直接切换状态。
+// 任务状态快捷切换：悬停徽章 → 其余四张状态小卡在右侧垂直依次弹出（当前状态不重复展示，徽章已经是它）；
+// 连线与"层别触须"同款：贝塞尔曲线 + 沿线流动的光点。鼠标移开 2 秒后收起（有空隙可穿行），悬停期间锁定不消失。
 class TaskStatusFan extends React.Component {
   constructor(props) {
     super(props);
-    this.state = {open: false};
-    this.timer = null;
+    this.state = {mounted: false, open: false};   // mounted=open 期间才挂 SVG/节点，283 张卡不留闲置动画
+    this.timer = null; this.untimer = null;
   }
-  componentWillUnmount() { clearTimeout(this.timer); }
-  enter = () => { clearTimeout(this.timer); this.setState({open: true}); };
+  componentWillUnmount() { clearTimeout(this.timer); clearTimeout(this.untimer); }
+  enter = () => {
+    clearTimeout(this.timer); clearTimeout(this.untimer);
+    if (!this.state.mounted) this.setState({mounted: true}, () => requestAnimationFrame(() => this.setState({open: true})));
+    else this.setState({open: true});
+  };
   leave = () => {
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.setState({open: false}), 2000);
+    this.timer = setTimeout(() => {
+      this.setState({open: false});
+      this.untimer = setTimeout(() => this.setState({mounted: false}), 450);
+    }, 2000);
   };
   render() {
     const {badge, task, onAction} = this.props;
+    const ops = TASK_OPS.filter(([, target]) => task?.status !== target);   // 当前状态不进扇形（徽章已展示）
+    const dx = 58;
     return <span className={`st-swap${this.state.open ? ' open' : ''}`} onClick={e => e.stopPropagation()} onPointerEnter={this.enter} onPointerLeave={this.leave}>
       <span className="fi-badge" style={{'--b': badge.color}}>{badge.text}</span>
-      {TASK_OPS.map(([zh, target, op], k) => {
-        const cur = task?.status === target;
-        const dy = (k - 2) * 28;                                  // 从上往下垂直排开（同层别清单）
-        const dx = 58;
-        const rad = Math.atan2(dy, dx);
-        const len = Math.round(Math.hypot(dx, dy));
-        return <React.Fragment key={target}>
-          <span className="st-line" style={{'--b': ST_COLOR[target], '--ang': rad + 'rad', '--len': len + 'px', '--d': k}}/>
-          <span role="button" tabIndex={cur ? -1 : 0} aria-disabled={cur}
-            className={`st-node${cur ? ' cur' : ''}`} style={{'--b': ST_COLOR[target], '--d': k, left: `calc(100% + ${dx - 6}px)`, top: `calc(50% + ${dy}px)`}}
-            onClick={ev => { ev.stopPropagation(); if (!cur) onAction({type: 'taskOp', id: task?.id, op}); }}
-            onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); if (!cur) onAction({type: 'taskOp', id: task?.id, op}); } }}>
-            {cur ? '✓ ' : ''}{zh}
-          </span>
-        </React.Fragment>;
+      {this.state.mounted && <svg className="st-svg" aria-hidden="true">
+        {ops.map(([, target], k) => {
+          const dy = (k - (ops.length - 1) / 2) * 28;                   // 四张卡垂直居中排开
+          const d = `M2 0 C${dx * .55} 0 ${dx * .55} ${dy} ${dx - 8} ${dy}`;   // 与层别触须同款 S 形曲线
+          return <React.Fragment key={target}>
+            <path className="st-line" style={{'--b': ST_COLOR[target], '--d': k}} d={d}/>
+            <circle className="st-pulse" style={{'--b': ST_COLOR[target]}} r="2.8">
+              <animateMotion dur="2.4s" begin={`${k * .35}s`} repeatCount="indefinite" path={d}/>
+            </circle>
+          </React.Fragment>;
+        })}
+      </svg>}
+      {ops.map(([zh, target, op], k) => {
+        const dy = (k - (ops.length - 1) / 2) * 28;
+        return <span role="button" tabIndex={0} key={target}
+          className="st-node" style={{'--b': ST_COLOR[target], '--d': k, left: `calc(100% + ${dx - 6}px)`, top: `calc(50% + ${dy}px)`}}
+          onClick={ev => { ev.stopPropagation(); onAction({type: 'taskOp', id: task?.id, op}); }}
+          onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); onAction({type: 'taskOp', id: task?.id, op}); } }}>
+          {zh}
+        </span>;
       })}
     </span>;
   }
@@ -639,13 +653,6 @@ function Dock({graph, onGo}) {
   const s = useMemo(() => stats(graph), [graph]);
   const [q, setQ] = useState('');
   const [cards, setCards] = useState(null);
-  const [asking, setAsking] = useState(false);   // 输入框聚焦：壁纸模式输入法挂不上，提示改走窗口输入
-  const hintT = useRef(null);                    // 失焦防抖：焦点抖动（系统抢焦点又抢回）时不让提示条闪烁
-  const askHint = v => {
-    clearTimeout(hintT.current);
-    if (v) setAsking(true);
-    else hintT.current = setTimeout(() => setAsking(false), 350);
-  };
   const typing = useRef(null);
   const ask = text => { if (text.trim()) setCards({q: text, list: askGraph(graph, text)}); };
   const typeAsk = text => {
@@ -655,6 +662,12 @@ function Dock({graph, onGo}) {
     typing.current = setInterval(() => { i++; setQ(text.slice(0, i)); if (i >= text.length) { clearInterval(typing.current); setTimeout(() => ask(text), 220); } }, 45);
   };
   useEffect(() => () => clearInterval(typing.current), []);
+  // 壁纸模式原生输入框（LivelyMod 提供，IME 中文可用）回填通道：提交=直接检索，失焦=关输入态
+  useEffect(() => {
+    window.__starNativeSubmit = text => { setQ(text); ask(text); };
+    window.__starNativeBlur = () => document.querySelector('.ask input')?.blur();
+    return () => { delete window.__starNativeSubmit; delete window.__starNativeBlur; };
+  }, [graph]);
   const kpis = [['内容节点', 'Notes', s.content], ['连接', 'Links', s.links], ['双向共振', 'Mutual', s.mutual], ['未创建', 'Unresolved', s.ghosts]];
   return <div className="dock">
     {cards && <section className="ask-results glass" aria-live="polite">
@@ -669,13 +682,9 @@ function Dock({graph, onGo}) {
     <div className="dock-panel glass">
       <div className="dock-kpis">{kpis.map(([k, en, v]) => <div key={k}><span>{k} <em>{en}</em></span><strong>{v}</strong></div>)}</div>
       <form className="ask" onSubmit={e => { e.preventDefault(); ask(q); }}>
-        <input value={q} onChange={e => setQ(e.target.value)} onFocus={() => { askHint(true); wvFocus(); }} onBlur={() => { askHint(false); wvBlur(); }} placeholder="问问你的生态图谱… Ask your graph" aria-label="向图谱提问"/>
+        <input value={q} onChange={e => setQ(e.target.value)} onFocus={e => wvFocus(e.target)} onBlur={() => wvBlur()} placeholder="问问你的生态图谱… Ask your graph" aria-label="向图谱提问"/>
         <button className="send" aria-label="提交问题"><Icon name="send" size={16}/></button>
       </form>
-      {asking && <div className="ask-hint">
-        <span><Icon name="info" size={12}/>壁纸模式打不了中文（输入法进不去）——英文数字可用，或点选下方问题</span>
-        <button type="button" onClick={() => window.open('http://127.0.0.1:5173/', '_blank')}>在窗口中打开<Icon name="outlink" size={11}/></button>
-      </div>}
       <div className="dock-chips">
         <span className="me"><Icon name="agent" size={13}/>我的图谱 <em>My graph</em></span>
         {['未结任务有哪些？', '待拍板', '服务健康', '最核心的内容', '记忆池', '未创建的笔记'].map(x => <button key={x} onClick={() => typeAsk(x)}>{x}</button>)}
