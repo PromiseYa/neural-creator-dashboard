@@ -119,7 +119,7 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
       const haloFade = (x1, y1, x2, y2) => {
         if (L.stage !== 'hub') return 1;
         const md = Math.hypot((x1 + x2) / 2 - cx, (y1 + y2) / 2 - cy);
-        return clamp((md - L.orb.s * .55) / (L.orb.s * .45), .06, 1);
+        return clamp((md - L.orb.s * .55) / (L.orb.s * .75), .06, 1);   // 淡出带扩到 1.3s：垂直长线在 .5~.7s 处仍显（用户图实测）
       };
       for (const k of links) {
         const [x1, y1, p1] = k.A.s, [x2, y2, p2] = k.B.s;

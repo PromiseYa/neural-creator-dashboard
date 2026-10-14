@@ -77,7 +77,9 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 /* 视频透明地留在原位负责播放，画面由同位置的 canvas.vid 逐帧绘制（兼容不合成 <video> 的内置浏览器） */
 .vsrc { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; }
 .orb-dust { position: absolute; left: -60%; top: -60%; width: 220%; height: 220%; pointer-events: none; }
-.orb .vid { position: relative; width: 100%; height: 100%; display: block; object-fit: cover; -webkit-mask-image: radial-gradient(circle closest-side at 50% 50%, #000 calc(var(--orb-m0) - 12%), rgba(0, 0, 0, .82) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .22), rgba(0, 0, 0, .4) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .45), rgba(0, 0, 0, .08) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .68), transparent 88%); mask-image: radial-gradient(circle closest-side at 50% 50%, #000 calc(var(--orb-m0) - 12%), rgba(0, 0, 0, .82) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .22), rgba(0, 0, 0, .4) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .45), rgba(0, 0, 0, .08) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .68), transparent 88%); filter: brightness(.86) contrast(1.1); }
+/* orb mask 全透点 88%→71%：orb_pal 视频画面右缘实测落在 closest-side 71% 处（1280x720 裁进 1:1 的画面边缘），
+   旧 stops 在那里还剩 ~63% 可见度=亮带右缘陡峭截断半露=用户看到的垂直切面断口；收到 71% 内把画面边缘全遮掉 */
+.orb .vid { position: relative; width: 100%; height: 100%; display: block; object-fit: cover; -webkit-mask-image: radial-gradient(circle closest-side at 50% 50%, #000 calc(var(--orb-m0) - 12%), rgba(0, 0, 0, .82) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .10), rgba(0, 0, 0, .4) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .16), rgba(0, 0, 0, .08) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .20), transparent 71%); mask-image: radial-gradient(circle closest-side at 50% 50%, #000 calc(var(--orb-m0) - 12%), rgba(0, 0, 0, .82) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .10), rgba(0, 0, 0, .4) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .16), rgba(0, 0, 0, .08) calc(var(--orb-m0) + (100% - var(--orb-m0)) * .20), transparent 71%); filter: brightness(.86) contrast(1.1); }
 .orb-halo { position: absolute; inset: -48%; border-radius: 50%; background: radial-gradient(circle closest-side, rgba(196, 197, 193, .4) 0%, rgba(186, 187, 183, .33) 30%, rgba(166, 167, 163, .24) 44%, rgba(146, 147, 143, .17) 52%, rgba(116, 117, 114, .1) 63%, rgba(86, 87, 84, .045) 76%, rgba(60, 61, 59, .012) 88%, transparent 100%); filter: blur(14px); animation: breathe 5.5s ease-in-out infinite; transition: scale 1.1s cubic-bezier(.4, 0, .2, 1), opacity 1.1s; }
 .scene.stage-module .orb-halo, .scene.stage-note .orb-halo { scale: 1.45; opacity: .72; }
 @keyframes breathe { 50% { transform: scale(1.08); opacity: .75; } }
@@ -172,6 +174,16 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 
 .hub-copy { position: absolute; left: 40px; top: 104px; max-width: 360px; transition: opacity .6s, transform .6s; animation: introFade 1.2s .5s both; pointer-events: none; }
 .stage-module .hub-copy, .stage-note .hub-copy { opacity: 0; transform: translateY(-10px); }
+/* —— 焦点显形制（用户令：除动画外全部文字/文本框做成生态流水同款——平时毛玻璃虚无、光标划过才显形，突出动画）：
+   手法与 ecostream 一致（低透明+去饱和，不用 blur——水母标签等每帧变换的元素挂 blur 会持续重算 GPU 滤镜）；
+   可收指针的走 :hover，被 scene 层盖住的（hub-copy）走坐标 .lit（onMouseMove 判定）；
+   fan-item 卡片的 opacity 由 rAF 每帧写 inline（生长动画）——只虚化卡内文字层（.fi-title/.fi-meta/.fi-badge）避免与 JS 相乘冲突，发光框属于动画视觉保留 */
+.hub-copy, .stage-tools, .topbar, .crumbs, .zone-trail, .analysis-wrap, .dock, .legend,
+.jelly-label .jl-icon, .jelly-label .jl-count, .jelly-label .jl-name, .jelly-label .jl-sub,
+.fan-item .fi-title, .fan-item .fi-meta, .fan-item .fi-badge { opacity: .16; filter: saturate(.5); transition: opacity .45s ease, filter .45s ease; }
+.hub-copy.lit, .stage-tools:hover, .stage-tools:focus-within, .topbar:hover, .crumbs:hover, .zone-trail:hover, .analysis-wrap:hover, .dock:hover, .dock:focus-within, .legend:hover,
+.jelly-label:hover .jl-icon, .jelly-label:hover .jl-count, .jelly-label:hover .jl-name, .jelly-label:hover .jl-sub,
+.fan-item:hover .fi-title, .fan-item:hover .fi-meta, .fan-item:hover .fi-badge { opacity: 1; filter: none; }
 /* —— 生态流水（左侧竖条，全视图固定）：无边框无底色，左上文案下方垂到屏幕底，面板可滚、底部渐隐 —— */
 .ecostream { position: absolute; left: 44px; bottom: 0; width: 330px; z-index: 1; display: flex; flex-direction: column; animation: ecoIntro 1s 2s backwards; pointer-events: auto;
   /* 平时重度虚化隐入星野（把注意力让给神经网络动画），光标移入才显形；

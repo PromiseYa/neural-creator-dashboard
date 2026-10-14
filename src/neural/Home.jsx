@@ -1074,9 +1074,12 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     const onMouseMove = e => { const L = live.current; L.cursor = {x: e.clientX, y: e.clientY};
       if (!sceneRect) sceneRect = el.getBoundingClientRect();
       L.mx = e.clientX - sceneRect.left; L.my = e.clientY - sceneRect.top;
-      // 流水显形判定：scene 层盖在流水上（z-index 2>1），CSS :hover 收不到——用坐标直接点亮 .lit
+      // 流水显形判定：scene 层盖在流水上（z-index 2>1），CSS :hover 收不到——用坐标直接点亮 .lit；
+      // hub-copy（pointer-events:none 被盖）同款坐标显形——焦点显形制：平时虚无，光标近了才亮
       const es = document.querySelector('.ecostream');
-      if (es) { const r = es.getBoundingClientRect(); es.classList.toggle('lit', e.clientX >= r.left - 10 && e.clientX <= r.right + 10 && e.clientY >= r.top - 8 && e.clientY <= r.bottom + 8); } };
+      if (es) { const r = es.getBoundingClientRect(); es.classList.toggle('lit', e.clientX >= r.left - 10 && e.clientX <= r.right + 10 && e.clientY >= r.top - 8 && e.clientY <= r.bottom + 8); }
+      const hc = document.querySelector('.hub-copy');
+      if (hc) { const r = hc.getBoundingClientRect(); hc.classList.toggle('lit', e.clientX >= r.left - 40 && e.clientX <= r.right + 40 && e.clientY >= r.top - 24 && e.clientY <= r.bottom + 24); } };
     const onSceneLeave = () => { live.current.mx = null; sceneRect = null; document.querySelector('.ecostream')?.classList.remove('lit'); };
     window.addEventListener('mousemove', onMouseMove);
     el.addEventListener('pointerleave', onSceneLeave);
