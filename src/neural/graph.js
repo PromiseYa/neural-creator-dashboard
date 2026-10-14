@@ -252,18 +252,18 @@ export function forceLayout(graph) {
       const base = rad(kb.angle);
       const zone = f === 'f:kb' ? id : f;   // 笔记→所在分区；分区锚点→自身
       let h = 0; for (const c of String(zone)) h = (h * 131 + c.charCodeAt(0)) % 9973;
-      const ang = base + (h / 9973 - .5) * 116 * Math.PI / 180;
-      return [Math.cos(ang), Math.sin(ang), 1];   // 第三位=紧贴标记：kb 团贴近水母（半径 240~300，别飘远）
+      const ang = base + (h / 9973 - .5) * 160 * Math.PI / 180;   // 宽扇面 ±80°（旧 ±58° 太窄=团挤一处）
+      return [Math.cos(ang), Math.sin(ang), 250 + h % 9973 / 9973 * 170];   // 第三位=各自分区团的远近（250~420 错开层次）；Obsidian 式散落四周而非全贴水母
     }
     const fd = FOLDERS.find(x => x.id === f) || FOLDERS.find(x => x.id === id);
     return fd ? [Math.cos(rad(fd.angle)), Math.sin(rad(fd.angle))] : null;
   };
   for (const n of all) {   // 初始化含 done 任务（弹簧段读它们的坐标，不初始化会 NaN 传染）
     const r = rng(n.id), a = anchor(n.id);
-    const near = a && a[2];
-    const R = n.kind === 'core' ? 0 : n.kind === 'folder' ? (n.level ? 300 : 210) : CONTENT.has(n.kind) ? (near ? 250 : 330) : 420;
+    const nearR = a && a[2];   // kb 分区团的锚点半径（250~420）
+    const R = n.kind === 'core' ? 0 : n.kind === 'folder' ? (n.level ? 300 : 210) : CONTENT.has(n.kind) ? (nearR || 330) : 420;
     const base = a ? Math.atan2(a[1], a[0]) : r() * Math.PI * 2;
-    const ang = base + (r() - .5) * (a ? (near ? .7 : 1.1) : 6.28);
+    const ang = base + (r() - .5) * (a ? (nearR ? .8 : 1.1) : 6.28);
     n.x = Math.cos(ang) * R * (0.8 + r() * .4); n.y = Math.sin(ang) * R * (0.8 + r() * .4); n.vx = 0; n.vy = 0;
   }
   const rest = {contain: 120, wiki: 95, source: 90, tag: 52, mention: 135, resonance: 170};
@@ -287,8 +287,8 @@ export function forceLayout(graph) {
     for (const n of N) {
       const a = anchor(n.id);
       if (n.kind === 'folder' && a) { const R = n.level ? 300 : 230; n.vx += (a[0] * R - n.x) * .04; n.vy += (a[1] * R - n.y) * .04; }
-      else if (a && a[2] && CONTENT.has(n.kind)) { n.vx += (a[0] * 265 - n.x) * .02; n.vy += (a[1] * 265 - n.y) * .02; }   // kb 团：中强引力贴水母
-      else if (a && CONTENT.has(n.kind)) { n.vx += (a[0] * 380 - n.x) * .006; n.vy += (a[1] * 380 - n.y) * .006; }
+      else if (a && a[2] && CONTENT.has(n.kind)) { n.vx += (a[0] * a[2] - n.x) * .012; n.vy += (a[1] * a[2] - n.y) * .012; }   // kb 团：弱引力牵在各自分区半径，斥力把点推散=光团弥散四周
+      else if (a && CONTENT.has(n.kind)) { n.vx += (a[0] * 430 - n.x) * .006; n.vy += (a[1] * 430 - n.y) * .006; }
       else if (a) { n.vx += (a[0] * 300 - n.x) * .004; n.vy += (a[1] * 300 - n.y) * .004; }
       n.vx -= n.x * .002; n.vy -= n.y * .002;
       if (n.kind === 'core') { n.x = 0; n.y = 0; n.vx = 0; n.vy = 0; continue; }

@@ -102,8 +102,10 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .jelly::before { content: ''; position: absolute; inset: 4% -6% -26%; pointer-events: none; border-radius: 50%;
   background: radial-gradient(ellipse 64% 36% at 50% 82%, color-mix(in srgb, var(--mod, #9ad) 17%, transparent), transparent 72%);
   opacity: calc(.55 + var(--fl, 0) * .5); }
-.jelly-inner { position: relative; width: 100%; height: 100%; -webkit-mask-image: radial-gradient(ellipse 68% 72% at 50% 46%, #000 42%, rgba(0, 0, 0, .5) 68%, transparent 92%); mask-image: radial-gradient(ellipse 68% 72% at 50% 46%, #000 42%, rgba(0, 0, 0, .5) 68%, transparent 92%); }
-.jelly .vid { width: 100%; height: 100%; display: block; object-fit: cover; -webkit-mask-image: radial-gradient(ellipse 62% 64% at 50% 46%, #000 45%, rgba(0, 0, 0, .45) 72%, transparent 90%); mask-image: radial-gradient(ellipse 62% 64% at 50% 46%, #000 45%, rgba(0, 0, 0, .45) 72%, transparent 90%); }
+/* mask 中心 36%=内容 bbox 中心（R51 内容左移 14% 后视频固有暗灰边缘从旧 mask 淡出区滑进实区=面板轮廓复发；
+   半径同步收紧，内容两缘 ±90px 恒落全透明区——边缘虚无。36% 在 canvas 坐标，flip 镜像自动对称 */
+.jelly-inner { position: relative; width: 100%; height: 100%; -webkit-mask-image: radial-gradient(ellipse 52% 64% at 36% 46%, #000 42%, rgba(0, 0, 0, .5) 66%, transparent 88%); mask-image: radial-gradient(ellipse 52% 64% at 36% 46%, #000 42%, rgba(0, 0, 0, .5) 66%, transparent 88%); }
+.jelly .vid { width: 100%; height: 100%; display: block; object-fit: cover; -webkit-mask-image: radial-gradient(ellipse 50% 62% at 36% 46%, #000 44%, rgba(0, 0, 0, .45) 66%, transparent 86%); mask-image: radial-gradient(ellipse 50% 62% at 36% 46%, #000 44%, rgba(0, 0, 0, .45) 66%, transparent 86%); }
 .jelly:hover, .jelly.active { filter: brightness(calc(1.32 + var(--fl, 0) * .38)) saturate(1.15) drop-shadow(0 0 16px color-mix(in srgb, var(--mod, #fff) 42%, transparent)); }
 .jelly:focus-visible { outline: none; filter: brightness(1.5); }
 /* 标签始终压在所有水母的点击区之上，避免游动时被别的水母挡住 */

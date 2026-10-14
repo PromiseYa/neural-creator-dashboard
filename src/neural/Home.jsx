@@ -634,11 +634,11 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           let x1, y1, x2, y2, c1x, c1y, c2x, c2y;
           if (L.stage === 'hub') {
             const dx = x - ox, dy = y - oy, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
-            x1 = ox + ux * os * .2; y1 = oy + uy * os * .2; x2 = x - ux * s * .22; y2 = y - uy * s * .1;
+            x1 = ox + ux * os * .2; y1 = oy + uy * os * .2; x2 = x - ux * s * .14; y2 = y - uy * s * .07;   // 终点停在水母亮区外（旧 .22 插进挪位后的伞体亮核，线被 screen 盖住=横切段）
             const bend = 26 * Math.sin(t * .5 + i);
             c1x = x1 + dx * .35 - uy * bend; c1y = y1 + dy * .35 + ux * bend; c2x = x1 + dx * .7 + uy * bend; c2y = y1 + dy * .7 - ux * bend;
           } else {
-            x1 = ox + os * .3; y1 = oy; x2 = x - s * .34; y2 = y;
+            x1 = ox + os * .3; y1 = oy; x2 = x - s * .26; y2 = y;
             const dx = x2 - x1; c1x = x1 + dx * .55; c1y = y1; c2x = x2 - dx * .55; c2y = y2;
           }
           const d = `M${x1},${y1} C${c1x},${c1y} ${c2x},${c2y} ${x2},${y2}`;
