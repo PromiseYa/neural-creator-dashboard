@@ -428,7 +428,7 @@ const DUST = Array.from({length: 110}, (_, i) => ({a: i * 2.39996, v: .035 + (i 
 const posterCache = new Map();
 const posterOf = url => { if (!posterCache.has(url)) { const img = new Image(); img.src = url; posterCache.set(url, img); } return posterCache.get(url); };
 function paintVideo(pair) {
-  const {video, canvas} = pair;
+  const {video, canvas, filter} = pair;
   if (!video || !canvas) return;
   const cw = canvas.clientWidth, ch = canvas.clientHeight;
   if (!cw || !ch) return;
@@ -445,6 +445,7 @@ function paintVideo(pair) {
   // 等同 object-fit: cover
   const k = Math.max(W / sw0, H / sh0), sw = W / k, sh = H / k;
   const ctx = canvas.getContext('2d');
+  if (pair.appliedFilter !== filter) { ctx.filter = filter || 'none'; pair.appliedFilter = filter; }   // 染色在绘制时套用：省掉 5 个常驻 GPU 滤镜合成层（颜色实现与 CSS filter 相同）
   ctx.clearRect(0, 0, W, H);
   ctx.drawImage(src, (sw0 - sw) / 2, (sh0 - sh) / 2, sw, sh, 0, 0, W, H);
 }
@@ -458,7 +459,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   const itemRefs = useRef([]), fanRefs = useRef([]), fanPulseRefs = useRef([]);
   const aItemRefs = useRef([]), aThreadRefs = useRef([]), aThreadPulseRefs = useRef([]);
   const vids = useRef({});
-  const vidRef = (id, part) => el => { (vids.current[id] ||= {})[part] = el; };
+  const vidRef = (id, part, filter) => el => { const p = (vids.current[id] ||= {}); p[part] = el; if (filter) p.filter = filter; };
   const summaries = useMemo(() => Object.fromEntries(MODULES.map(m => [m.id, moduleSummary(graph, m)])), [graph]);
 
   useLayoutEffect(() => { live.current.fanStart = performance.now(); }, [items, live]);
@@ -487,8 +488,9 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       L.orb = {x: ox, y: oy, s: os};
       if (orbRef.current) { orbRef.current.style.transform = `translate3d(${ox - os / 2}px,${oy - os / 2}px,0) scale(${os / 460})`; orbRef.current.style.opacity = clamp(oo, 0, 1); }
       const dust = dustRef.current;
-      if (dust) {
-        const di = clamp(spring(S.dust, L.stage === 'hub' ? .3 : 1, dt, 18), 0, 1);
+      L.fc = (L.fc || 0) + 1;   // 帧计数：尘埃=光球背景层，隔帧绘制（33fps，符合"前景60/背景33"节奏），停绘帧保留上一帧画面
+      if (dust && L.fc % 2 === 0) {
+        const di = clamp(spring(S.dust, L.stage === 'hub' ? .3 : 1, dt * 2, 18), 0, 1);
         const ctx = dust.getContext('2d');
         ctx.clearRect(0, 0, 1012, 1012);
         if (!L.reduced && di > .02) {
@@ -525,7 +527,12 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         if (el) el.style.setProperty('--fl', fv.toFixed(3));
         if (inner) inner.style.transform = `rotate(${tg.tilt}deg) scaleX(${MOD_STYLE[m.id].flip})`;
         if (lab) {
-          const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
+          // 标签尺寸缓存：每帧读 offsetWidth=强制同步布局（帧率杀手），只在首次/标记脏时实测；
+          // 脏位由 resize 与字体加载置起，循环末统一清除
+          const SZ = L.labSz || (L.labSz = {});
+          let sz = SZ[m.id];
+          if (!sz || L.labDirty) sz = SZ[m.id] = {w: lab.offsetWidth, h: lab.offsetHeight};
+          const lw = sz.w, lh = sz.h, ng = L.noteG || 1;
           const hub = L.stage === 'hub', narrow = L.size.w < 760;
           // 标签统一放水母正下方（hub 同款）：不占右侧连线路径，触须直接从伞体右缘出发
           const lx = x - lw / 2;
@@ -610,6 +617,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           });
         }
       });
+      L.labDirty = false;   // 本帧已按需重测全部标签，脏位清除
       // 光标=黑洞视界：低通跟随点上的吸积双环+暗核，靠近任何水母时淡入（引力场可见）；
       // 同款空闲零开销——不可见且淡出完毕后不再写 DOM
       const gv = gravRef.current;
@@ -725,11 +733,12 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
     return () => cancelAnimationFrame(raf);
   }, [items, live, sel]);
 
-  // 暂停时一并暂停视频
+  // 暂停时一并暂停视频；字体加载完成后标签尺寸变化 → 置脏位重测（配合尺寸缓存）
   useEffect(() => {
     const sync = () => document.querySelectorAll('.scene video').forEach(v => { if (live.current.paused || live.current.reduced || document.hidden) v.pause(); else v.play().catch(() => {}); });
     live.current.syncVideo = sync; sync();
     document.addEventListener('visibilitychange', sync);
+    document.fonts?.ready?.then(() => { live.current.labDirty = true; });
     return () => document.removeEventListener('visibilitychange', sync);
   }, [live]);
 
@@ -737,7 +746,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   // 静态兜底位置：渲染帧（rAF）冻结时（如窗口被遮挡）各元素也按最终布局可见可点，正常时 rAF 接管动画
   const t0 = targets(live.current, 0);
   return <div className={`scene stage-${live.current.stage}`} ref={sceneRef}>
-    <div className="orb clickable" ref={orbRef} role="button" tabIndex={-1} aria-label="回到星图主页" title="回到星图主页"
+    <div className="orb clickable" ref={orbRef} role="button" tabIndex={-1} aria-label="回到星图主页"
       onClick={() => onHome()} onPointerEnter={() => { live.current.hover = 'core'; }} onPointerLeave={() => { live.current.hover = null; }}>
       <div className="orb-halo"/>
       <video className="vsrc" ref={vidRef('orb', 'video')} src={T.media.orb} poster={T.media.orbPoster} muted loop playsInline autoPlay preload="auto"/>
@@ -778,10 +787,10 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }}
           style={{'--mod': MOD_STYLE[m.id].color}}
           aria-label={`${m.title} ${m.en}，${sum.count} 条`}>
-          <div className="jelly-inner" ref={el => { innerRefs.current[m.id] = el; }} style={{filter: MOD_STYLE[m.id].filter}}>
-            <video className="vsrc" ref={vidRef(m.id, 'video')} src={T.media.jelly} poster={T.media.jellyPoster} muted loop playsInline autoPlay preload="auto"
+          <div className="jelly-inner" ref={el => { innerRefs.current[m.id] = el; }}>
+            <video className="vsrc" ref={vidRef(m.id, 'video', MOD_STYLE[m.id].filter)} src={T.media.jelly} poster={T.media.jellyPoster} muted loop playsInline autoPlay preload="auto"
               onLoadedMetadata={e => { e.currentTarget.currentTime = (MODULES.indexOf(m) * 1.37) % 6; }}/>
-            <canvas className="vid" ref={vidRef(m.id, 'canvas')}/>
+            <canvas className="vid" ref={vidRef(m.id, 'canvas', MOD_STYLE[m.id].filter)}/>
           </div>
         </button>
         <button className={`jelly-label ${active ? 'active' : ''} ${hub || live.current.size.w >= 760 ? 'below' : 'side'}`} ref={el => { labelRefs.current[m.id] = el; }} onClick={() => onModule(m.id)} tabIndex={-1}
@@ -1099,8 +1108,10 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     };
     calc();
     const t = setTimeout(calc, 900);   // 首帧后标题/字体定稿再复量一次
+    const markDirty = () => { live.current.labDirty = true; };   // 标签尺寸随窗口变化 → 置脏重测（配合尺寸缓存）
     window.addEventListener('resize', calc);
-    return () => { clearTimeout(t); window.removeEventListener('resize', calc); };
+    window.addEventListener('resize', markDirty);
+    return () => { clearTimeout(t); window.removeEventListener('resize', calc); window.removeEventListener('resize', markDirty); };
   }, []);
 
   return <section ref={stageRef} className={`home-stage stage-${stage} ${live.current.introSeen ? 'intro-done' : ''}`} aria-label="创作神经图谱">
