@@ -258,18 +258,17 @@ export function targets(L, t) {
     const js = MODULES.map((m, i) => {
       const rm = RM[m.id] || (RM[m.id] = {x: 0, y: 0, vx: 4, vy: 0, ang: Math.random() * 6.28, spd: 6, turnAt: 0, targetAng: 0, targetSpd: 7, hitAt: 0});
       if (swim) {
-        // 光标吸引=真追逐（跟手的关键，仿真验证 100% 跟随/最大距离 119px）：进入 300px 换目标角为
-        // 前置预测角（朝光标去向游，折返不甩尾）、速度按"距离+光标速度"自适应（追得上慢拖）；
-        // 追逐态转向/加速更灵敏、豁免归心；鼠标移开后 turnAt 到期恢复随机漫游（慵懒参数不变）
+        // 光标吸引=真追逐：感应半径 190px（旧 300 太远、很远就跑过来）；速度自适应上限 42（慢拖仍咬得住，
+        // 仿真 96.7% 跟随）；转弯/加速整体放缓=从容丝滑；前置预测 .8（转弯慢了更要提前预判折返）
         let chase = false;
         if (L.smx != null) {
           const cdx = L.smx - (base[i].x + rm.x), cdy = L.smy - (base[i].y + rm.y), cd = Math.hypot(cdx, cdy);
-          if (cd < 300 && cd > 4) { chase = true; rm.targetAng = Math.atan2(cdy + (L.smvy || 0) * .7, cdx + (L.smvx || 0) * .7); rm.targetSpd = clamp(6 + cd * .08 + Math.hypot(L.smvx || 0, L.smvy || 0) * 1.15, 8, 46); rm.turnAt = t + .5; }
+          if (cd < 190 && cd > 4) { chase = true; rm.targetAng = Math.atan2(cdy + (L.smvy || 0) * .8, cdx + (L.smvx || 0) * .8); rm.targetSpd = clamp(5 + cd * .07 + Math.hypot(L.smvx || 0, L.smvy || 0) * 1.15, 7, 42); rm.turnAt = t + .5; }
         }
         if (!chase && t >= rm.turnAt) { rm.turnAt = t + 3.5 + Math.random() * 5.5; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 4 + Math.random() * 9; }   // 随机掉头
         let da = rm.targetAng - rm.ang; da = Math.atan2(Math.sin(da), Math.cos(da));
-        const turn = chase ? 2.4 : 1.1, acc = chase ? 1.8 : .5, fol = chase ? 2.4 : .8;
-        rm.ang += clamp(da, -turn * dt, turn * dt);   // 受限角速度=转弯柔和（追逐时更灵敏）
+        const turn = chase ? 1.6 : 1.1, acc = chase ? 1 : .5, fol = chase ? 1.4 : .8;   // 追逐态仍比漫游灵敏，但整体放缓=丝滑（旧 2.4/1.8/2.4 太猛）
+        rm.ang += clamp(da, -turn * dt, turn * dt);
         rm.spd += (rm.targetSpd - rm.spd) * Math.min(1, dt * acc);
         rm.vx += (Math.cos(rm.ang) * rm.spd - rm.vx) * Math.min(1, dt * fol);
         rm.vy += (Math.sin(rm.ang) * rm.spd * .45 - rm.vy) * Math.min(1, dt * fol);
@@ -285,10 +284,11 @@ export function targets(L, t) {
       const {rm, id} = j, s = jsz, lb = LB[id] || {w: 132, h: 56};
       const ax = j.bx + rm.x, ay = j.by + rm.y;
       const mSide = Math.max(s * .45, lb.w / 2) + 10, mTop = s * .375 + 8, mBot = s * .36 + lb.h + 10;
-      if (ax < mSide) { rm.x = mSide - j.bx; rm.vx = Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; rm.hitAt = t; }
-      if (ax > W - mSide) { rm.x = W - mSide - j.bx; rm.vx = -Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; rm.hitAt = t; }
-      if (ay < mTop) { rm.y = mTop - j.by; rm.vy = Math.abs(rm.vy); rm.ang = -rm.ang; rm.hitAt = t; }
-      if (ay > H - mBot) { rm.y = H - mBot - j.by; rm.vy = -Math.abs(rm.vy); rm.ang = -rm.ang; rm.hitAt = t; }
+      // 回弹观感：反射后该轴速度保底 12px/s（轻擦屏边也能看到弹一下），受惊收缩配合
+      if (ax < mSide) { rm.x = mSide - j.bx; rm.vx = Math.max(Math.abs(rm.vx), 12); rm.ang = Math.PI - rm.ang; rm.hitAt = t; }
+      if (ax > W - mSide) { rm.x = W - mSide - j.bx; rm.vx = -Math.max(Math.abs(rm.vx), 12); rm.ang = Math.PI - rm.ang; rm.hitAt = t; }
+      if (ay < mTop) { rm.y = mTop - j.by; rm.vy = Math.max(Math.abs(rm.vy), 12); rm.ang = -rm.ang; rm.hitAt = t; }
+      if (ay > H - mBot) { rm.y = H - mBot - j.by; rm.vy = -Math.max(Math.abs(rm.vy), 12); rm.ang = -rm.ang; rm.hitAt = t; }
     });
     for (let i = 0; i < js.length; i++) for (let k = i + 1; k < js.length; k++) {   // 成对相撞（椭圆判定：水平含标签半宽，垂直按伞体）互换法向速度+位置分离
       const A = js[i], B = js[k];
@@ -299,7 +299,9 @@ export function targets(L, t) {
         const nx = nx0 / dd, ny = ny0 / dd, push = (1 - dd) / 2;
         A.rm.x += nx * push * rx; A.rm.y += ny * push * ry; B.rm.x -= nx * push * rx; B.rm.y -= ny * push * ry;
         const dv = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
-        if (dv < 0) { A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv; A.rm.hitAt = t; B.rm.hitAt = t; }   // 仅相互接近时弹开
+        if (dv < 0) { A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv; }   // 仅相互接近时弹开
+        const sep = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;   // 回弹观感：法向分离速度不足 14px/s 就补足（轻碰也能看到弹开）
+        if (sep < 14) { const add = (14 - sep) / 2; A.rm.vx += nx * add; A.rm.vy += ny * add; B.rm.vx -= nx * add; B.rm.vy -= ny * add; A.rm.hitAt = t; B.rm.hitAt = t; }
       }
     }
     // 主神经（光球↔各水母的神经丝）也是实体：游进别的神经丝走廊=被碰到——沿法线弹出+速度反射，
@@ -318,18 +320,20 @@ export function targets(L, t) {
         if (d > 0.01 && d < minD) {
           const nx = dx / d, ny = dy / d, push = minD - d;
           rm.x += nx * push; rm.y += ny * push; abs[i][0] += nx * push; abs[i][1] += ny * push;
-          const vn = rm.vx * nx + rm.vy * ny;
-          if (vn < 0) { rm.vx -= 2 * vn * nx; rm.vy -= 2 * vn * ny; rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; rm.hitAt = t; rm.spd = Math.max(rm.spd, 9); }   // 反弹+受惊收缩+弹开提速
+          let vn = rm.vx * nx + rm.vy * ny;
+          if (vn < 0) { rm.vx -= 2 * vn * nx; rm.vy -= 2 * vn * ny; vn = -vn; }   // 速度反射
+          if (vn < 14) { const add = 14 - vn; rm.vx += nx * add; rm.vy += ny * add; vn = 14; }   // 回弹观感：法向弹开速度保底 14px/s
+          rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; rm.hitAt = t; rm.spd = Math.max(rm.spd, 12);
         }
       }
     }
     MODULES.forEach((m, i) => {
       const {rm, bx, by} = js[i];
-      const jj = {x: bx + rm.x, y: by + rm.y + swim * 7 * Math.sin(t * .8 + i * 2.1), s: jsz, o: 1,
-        tilt: clamp(rm.vx * 1.6, -18, 18) + swim * 2 * Math.sin(t * .6 + i),   // 倾倒主要由真实水平速度驱动（活物感），仅叠 2° 微摆
+      const jj = {x: bx + rm.x, y: by + rm.y + swim * 5 * Math.sin(t * .8 + i * 2.1), s: jsz, o: 1,
+        tilt: clamp(rm.vx * 1.15, -14, 14) + swim * 2 * Math.sin(t * .6 + i),   // 倾倒由真实速度驱动但放缓（丝滑优先）
         spd: Math.hypot(rm.vx, rm.vy), vy: rm.vy, hit: rm.hitAt || 0};   // 供水母伞体脉动/俯仰渲染
-      // 近距强吸：追逐物理（上面）把水母带到光标 150px 内后，黑洞拉力近乎贴住光标；缩小、头转向光标
-      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 150 && d > 2) { const u = 1 - d / 150; const f = Math.pow(u, 1.6) * 92; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .25; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .4, -18, 18); } }
+      // 近距强吸：110px 内黑洞拉力贴住光标；u^2.2 边缘平缓中心才强（旧 150px u^1.6 陡得突兀）
+      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 110 && d > 2) { const u = 1 - d / 110; const f = Math.pow(u, 2.2) * 96; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .25; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .4, -18, 18); } }
       jj.tilt = clamp(jj.tilt, -26, 26);
       res.jelly[m.id] = jj;
     });
@@ -349,8 +353,8 @@ export function targets(L, t) {
       const sel = m.id === L.mod, k = slotOf(L.mod, m.id);
       // 左右摇摆漂浮（幅 12px，选中水母也漂，触须有弹簧自然跟随）；上下起伏 9px；相位错开
       const jj = {x: colX + (sel ? 16 : 0) + swim * 12 * Math.sin(t * .26 + i * 1.7), y: cy + (k - 2) * gap + swim * 9 * Math.sin(t * .9 + i * 2), s: sel ? 128 : 92, o: sel ? 1 : .6, tilt: swim * 3 * Math.sin(t * .6 + i) + swim * 4 * Math.cos(t * .26 + i * 1.7)};   // 末项=头随横摆方向倾倒
-      // 侧列同款黑洞吸引（加强版）：拉力 u^1.7 限 34px（旧 16px 吸不住），缩小 12%，头转向光标（与 hub 同款 atan2(dx,-dy)）
-      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 240 && d > 2) { const u = 1 - d / 240; const f = Math.pow(u, 1.7) * 34; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .12; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .3, -12, 12); } }
+      // 侧列同款黑洞吸引（感应缩小+更柔）：170px 内 u^2*30，缩小 12%，头转向光标（与 hub 同款 atan2(dx,-dy)）
+      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 170 && d > 2) { const u = 1 - d / 170; const f = Math.pow(u, 2) * 30; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .12; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .3, -12, 12); } }
       res.jelly[m.id] = jj;
     });
     // 伞状条目以右侧分析栏为基准排在它左边约 90px 处（条目最宽约 270px），触须拉长、画面左右均衡；
@@ -551,12 +555,12 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         const fv0 = !L.reduced && t < fl.until ? Math.sin((1 - (fl.until - t) / 1.1) * Math.PI) : 0;
         // 吸积增亮：光标逼近（黑洞视界）时水母自体光亮抬升——先被点亮再被吞入
         let fv = fv0;
-        if (!L.reduced && L.smx != null) { const ddx = L.smx - x, ddy = L.smy - y; const dd = Math.hypot(ddx, ddy); if (dd < 260) fv = Math.max(fv, (1 - dd / 260) * .6); }
+        if (!L.reduced && L.smx != null) { const ddx = L.smx - x, ddy = L.smy - y; const dd = Math.hypot(ddx, ddy); if (dd < 190) fv = Math.max(fv, (1 - dd / 190) * .6); }
         if (el) el.style.setProperty('--fl', fv.toFixed(3));
         // 姿态=真实运动驱动：伞体收缩节律随游速加快（喷水推进感），被撞/撞边瞬间受惊收缩 0.6s，
         // 升降映射轻微俯仰（scaleY）；静止时保留 ~1.8s 呼吸微脉动——不游也是活的
         const fsp = Math.min(tg.spd || 0, 12);   // 脉动频率封顶（12px/s 以上同频），否则追逐高速时变成抽搐
-        const cfq = .55 + fsp * .09;
+        const cfq = .38 + fsp * .06;
         let ct = Math.pow(Math.sin(t * cfq * Math.PI + i * 1.3), 2) * clamp(.18 + fsp * .05, .2, .6);
         const hAgo = tg.hit ? t - tg.hit : 9;
         if (hAgo < .6) ct = Math.min(1, ct + (1 - hAgo / .6) * .8);
@@ -582,7 +586,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         // 驱动三层特效——水母伞缘水波纹（拉得越强纹越密）、吸入光丝（光点漂向光标）、光标吸积环 ——
         let pu = 0;
         if (L.smx != null && !L.reduced) {
-          const R = L.stage === 'hub' ? 300 : 240;
+          const R = L.stage === 'hub' ? 190 : 170;
           const gdx = L.smx - x, gdy = L.smy - y, gdd = Math.hypot(gdx, gdy);
           if (gdd < R && gdd > 2) pu = 1 - gdd / R;
         }
@@ -665,7 +669,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         if (target > 0 || cur > .004) {
           gv._op = Math.max(target, cur - dt * 1.4);   // 淡入直接跟、淡出走平滑
           gv.style.opacity = gv._op.toFixed(3);
-          gv.style.transform = `translate3d(${L.smx || 0}px,${L.smy || 0}px,0)`;
+          gv.style.transform = `translate3d(${L.mx || 0}px,${L.my || 0}px,0)`;   // 环贴真实光标（低通点会甩在后面=迟滞感）
           const r1 = gv.children[0], r2 = gv.children[1];
           if (r1) r1.style.strokeDashoffset = -((t * 26) % 43);
           if (r2) r2.style.strokeDashoffset = (t * 17) % 27;
