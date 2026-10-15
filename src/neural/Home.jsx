@@ -310,14 +310,52 @@ export function targets(L, t) {
     }
     MODULES.forEach((m, i) => {
       const {rm, bx, by} = js[i];
-      // 左右摆动严格对称（用户令 10-15）：零均值正弦摆动，摆幅随速度增大但无持久单向偏置——
-      // 真实水母的推进=伞体脉冲式左右交替摆，去掉了旧的"头随移动方向持久倾倒"偏置项
+      // 左右摆动严格对称 + 姿态随移动方向动态倾倒（用户令 10-15 三轮）：
+      // 摆动=零均值正弦（左右等幅）；倾倒=速度方向函数（向左游头左倾、向右游头右倾，|vx| 对称等幅）
       const swayAmp = 5 + Math.min(3, Math.abs(rm.vx) * .3);
+      const velTilt = clamp(rm.vx * .9, -11, 11);
       const jj = {x: bx + rm.x, y: by + rm.y + swim * 14 * Math.sin(t * .8 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1,
-        tilt: swim * swayAmp * Math.sin(t * 1.35 + i * 1.3), pull: 0};
-      // 黑洞式吸引（感应半径 150px，用户令：不再离很远就跑过来）：越近拉力越陡（u^1.8），水母缩小；
-      // 头转向光标不在即时偏置 tilt，改由渲染端弹簧驱动（灵动、带轻微过冲）——jj.pull 传吸引强度
-      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 150 && d > 2) { const u = 1 - d / 150; const f = Math.pow(u, 1.8) * 20; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .2; jj.pull = u; } }
+        tilt: swim * (swayAmp * Math.sin(t * 1.35 + i * 1.3) + velTilt), pull: 0};
+      // 鼠标交互（用户令 10-15 四轮）：外圈渐进吸附（越近越强、循序渐进）、内层提起跟随；
+      // 拖动脱钩后沿拖动方向漫游；拖动位置出屏/压进别的神经走廊=反弹脱钩（内层 s*.5 进、外圈 150 出迟滞）
+      if (L.smx != null) {
+        const adx = L.smx - jj.x, ady = L.smy - jj.y, add = Math.hypot(adx, ady);
+        if (!rm.att && add < jj.s * .5) { rm.att = true; rm.ax = null; rm.ay = null; }
+        if (rm.att) {
+          const detach = (nx, ny) => {   // 脱钩：位置写回漫游坐标，反弹初速=给定法线（无给定时按拖动方向漫游）
+            rm.att = false; rm.ax = null; rm.ay = null;
+            rm.x = jj.x - bx; rm.y = jj.y - by;
+            const mvSpd = Math.hypot(L.mvx || 0, L.mvy || 0);
+            if (nx != null) { const bs = 26; rm.vx = nx * bs; rm.vy = ny * bs * .8; }
+            else if (mvSpd > 40) { const dr = Math.min(7.5, 1.8 + mvSpd / 260); rm.ang = Math.atan2(L.mvy, L.mvx); rm.vx = Math.cos(rm.ang) * dr; rm.vy = Math.sin(rm.ang) * dr * .45; rm.spd = dr; }
+            else { rm.vx = (L.mvx || 0) * .012; rm.vy = (L.mvy || 0) * .012; }
+            rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang; rm.turnAt = t + 2.6;
+            jj.x = bx + rm.x; jj.y = by + rm.y;
+          };
+          if (add > 150) detach(null, null);   // 拉出感应圈：沿拖动方向漫游
+          else {
+            const k = Math.min(1, (L.dt || 0) * 3.2);
+            rm.ax = rm.ax == null ? jj.x : rm.ax + (L.smx - rm.ax) * k;
+            rm.ay = rm.ay == null ? jj.y : rm.ay + (L.smy - rm.ay) * k;
+            jj.x = rm.ax; jj.y = rm.ay;
+            jj.pull = Math.max(jj.pull, .55); jj.s *= 1.05; jj.att = true;
+            // 硬约束（用户令）：不出屏幕、不压别的神经丝走廊——碰到即反弹脱钩回漫游
+            const PAD = 92;
+            let bn = null;
+            if (jj.x < PAD) bn = [1, 0]; else if (jj.x > W - PAD) bn = [-1, 0];
+            else if (jj.y < PAD - 10) bn = [0, 1]; else if (jj.y > H - PAD + 10) bn = [0, -1];
+            if (!bn) for (let k2 = 0; k2 < abs.length; k2++) {
+              if (k2 === i) continue;
+              const ex = abs[k2][0] - ocx, ey = abs[k2][1] - ocy, el2 = Math.hypot(ex, ey) || 1;
+              const ux = ex / el2, uy = ey / el2;
+              const proj = clamp((jj.x - ocx) * ux + (jj.y - ocy) * uy, 0, el2);
+              const ddx = jj.x - (ocx + ux * proj), ddy = jj.y - (ocy + uy * proj), dd2 = Math.hypot(ddx, ddy);
+              if (dd2 < jsz * .48 + 12 && dd2 > .01) { bn = [ddx / dd2, ddy / dd2]; break; }
+            }
+            if (bn) detach(bn[0], bn[1]);
+          }
+        } else if (add < 150 && add > 2) { const u = 1 - add / 150; const f = Math.pow(u, 1.8) * 60; jj.x += adx / add * f; jj.y += ady / add * f; jj.s *= 1 - u * .2; jj.pull = u; }
+      } else rm.att = false;
       jj.tilt = clamp(jj.tilt, -26, 26);
       res.jelly[m.id] = jj;
     });
@@ -537,13 +575,22 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         let fv = fv0;
         if (!L.reduced && L.smx != null) { const ddx = L.smx - x, ddy = L.smy - y; const dd = Math.hypot(ddx, ddy); if (dd < 150) fv = Math.max(fv, (1 - dd / 150) * .6); }
         if (el) el.style.setProperty('--fl', fv.toFixed(3));
-        // 头转向光标（灵动弹簧，用户令 10-15）：目标角=朝向光标×吸引强度，软弹簧带轻微过冲摆过去，
-        // 再叠被吸引时的头部微颤（活物感）——真实水母的转向是脉冲式，不是刚体偏转
+        // 头转向（灵动弹簧）：被拖动时头朝拖动方向、触手在后跟随（全角度+最短路径旋转，用户令四轮）；
+        // 平时朝向光标（±38° 内），弹簧带轻微过冲=脉冲式转向的活物感
         const hyS = j.hyS || (j.hyS = {x: 0, v: 0});
-        const yawT = tg.pull ? clamp(Math.atan2(L.smx - x, -(L.smy - y)) * 180 / Math.PI, -38, 38) * Math.min(1, tg.pull * 1.4) : 0;
+        const mSpd = Math.hypot(L.mvx || 0, L.mvy || 0);
+        const dragging = tg.att && mSpd > 26;
+        let yawT;
+        if (dragging) {
+          let yd = Math.atan2(L.mvy, L.mvx) * 180 / Math.PI + 90;   // +90=视频头朝上的补偿
+          yawT = hyS.x + (((yd - hyS.x) % 360) + 540) % 360 - 180;  // 归一到最短旋转路径
+        } else yawT = tg.pull ? clamp(Math.atan2(L.smx - x, -(L.smy - y)) * 180 / Math.PI, -38, 38) * Math.min(1, tg.pull * 1.4) : 0;
         const hy = spring(hyS, yawT, dt, 16);
-        const tremor = tg.pull ? 2.2 * Math.sin(t * 2.6 + i) * Math.min(1, tg.pull * 1.5) : 0;
-        if (inner) inner.style.transform = `rotate(${clamp(tg.tilt + hy + tremor, -30, 30)}deg) scaleX(${MOD_STYLE[m.id].flip}) scaleY(${L.stage === 'hub' ? 1 : .92})`;
+        const tremor = tg.pull && !dragging ? 2.2 * Math.sin(t * 2.6 + i) * Math.min(1, tg.pull * 1.5) : 0;
+        // 姿态角乘 flip 补偿镜像（kb/decisions/services 是 scaleX(-1) 水母）：保证群体倾倒同向、左右等幅
+        const flipX = MOD_STYLE[m.id].flip;
+        const rot = dragging ? (hy + tg.tilt * .4) * flipX : clamp((tg.tilt + hy + tremor) * flipX, -30, 30);
+        if (inner) inner.style.transform = `rotate(${rot}deg) scaleX(${flipX}) scaleY(${L.stage === 'hub' ? 1 : .92})`;
         if (lab) {
           const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
           const hub = L.stage === 'hub', narrow = L.size.w < 760;
@@ -770,7 +817,8 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   const hub = live.current.stage === 'hub';
   // 静态兜底位置：渲染帧（rAF）冻结时（如窗口被遮挡）各元素也按最终布局可见可点，正常时 rAF 接管动画
   const t0 = targets(live.current, 0);
-  return <div className={`scene stage-${live.current.stage}`} ref={sceneRef}>
+  return <>
+    <div className={`scene stage-${live.current.stage}`} ref={sceneRef}>
     <div className="orb clickable" ref={orbRef} role="button" tabIndex={-1} aria-label="回到星图主页"
       onClick={() => onHome()} onPointerEnter={() => { live.current.hover = 'core'; }} onPointerLeave={() => { live.current.hover = null; }}>
       <div className="orb-halo"/>
@@ -778,59 +826,6 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       <canvas className="vid" ref={vidRef('orb', 'canvas')}/>
       <canvas className="orb-dust" ref={dustRef} width="1012" height="1012"/>
     </div>
-    <svg className="threads" aria-hidden="true">
-      <defs>
-        <filter id="thread-blur" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3.2"/></filter>
-        <radialGradient id="pulse-out"><stop offset="0" stopColor={T.pulse.out[0]}/><stop offset=".4" stopColor={T.pulse.out[1]}/><stop offset="1" stopColor={T.pulse.out[1]} stopOpacity="0"/></radialGradient>
-        <radialGradient id="pulse-in"><stop offset="0" stopColor={T.pulse.in[0]}/><stop offset=".4" stopColor={T.pulse.in[1]}/><stop offset="1" stopColor={T.pulse.in[1]} stopOpacity="0"/></radialGradient>
-      </defs>
-      {MODULES.map(m => <g key={m.id} style={{color: MOD_STYLE[m.id].color}}>
-        <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], glow: el}; }} className="thread-glow" filter="url(#thread-blur)"/>
-        <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], core: el}; }} className="thread-core"/>
-        {[0, 1, 2].map(k => <circle key={k} r={k === 2 ? 4.5 : 5.5} fill={`url(#${k === 2 ? 'pulse-in' : 'pulse-out'})`} ref={el => { (pulseRefs.current[m.id] ||= [])[k] = el; }}/>)}
-        {[0, 1, 2].map(k => <path key={'rip' + k} className="jelly-rip" ref={el => { (ripRefs.current[m.id] ||= [])[k] = el; }}/>)}
-        {[0, 1].map(k => <circle key={'spk' + k} className="jelly-spark" r="2.2" ref={el => { (sparkRefs.current[m.id] ||= [])[k] = el; }}/>)}
-      </g>)}
-      <g className="grav" ref={gravRef} aria-hidden="true">
-        <circle className="grav-ring" r="30"/>
-        <circle className="grav-ring2" r="21"/>
-        <circle className="grav-core" r="8"/>
-      </g>
-      {(t0.acols ? ancLevels || [] : []).map((lvl, k) => lvl.map((n, i) => <g key={'at' + k + n.id}>
-        <path className="chain-thread dim" ref={el => { (aThreadRefs.current[k] ||= [])[i] = el; }}/>
-        <circle r="4" fill="url(#pulse-out)" ref={el => { (aThreadPulseRefs.current[k] ||= [])[i] = el; }}/>
-      </g>))}
-      {items.map((n, i) => <g key={n.id} style={{color: KINDS[n.kind].color}}>
-        <path className="fan-thread" ref={el => { fanRefs.current[i] = el; }}/>
-        {[0, 1].map(k => <circle key={k} r={k ? 3.5 : 4.5} fill={`url(#${k ? 'pulse-in' : 'pulse-out'})`} ref={el => { (fanPulseRefs.current[i] ||= [])[k] = el; }}/>)}
-      </g>)}
-    </svg>
-    {MODULES.map(m => {
-      const sum = summaries[m.id], active = live.current.mod === m.id;
-      // 静态兜底（与 fan-item 同款）：rAF 冻结（WebView2 失焦/被遮挡）时水母也按最终布局可见，
-      // 不再叠死在左上角——10-15 壁纸端"点进模块水母消失"的根因修复
-      const j0 = t0.jelly[m.id] || {x: 100, y: 100, s: 92, o: 1};
-      return <React.Fragment key={m.id}>
-        <button className={`jelly ${active ? 'active' : ''}`} ref={el => { jellyRefs.current[m.id] = el; }} onClick={() => onModule(m.id)}
-          onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }}
-          style={{'--mod': MOD_STYLE[m.id].color, transform: `translate3d(${j0.x - j0.s / 2}px,${j0.y - j0.s * .375}px,0) scale(${j0.s / 200})`, opacity: j0.o}}
-          aria-label={`${m.title} ${m.en}，${sum.count} 条`}>
-          <div className="jelly-inner" ref={el => { innerRefs.current[m.id] = el; }} style={{filter: MOD_STYLE[m.id].filter}}>
-            <video className="vsrc" ref={vidRef(m.id, 'video')} src={T.media.jelly} poster={T.media.jellyPoster} muted loop playsInline autoPlay preload="auto"
-              onLoadedMetadata={e => { e.currentTarget.currentTime = (MODULES.indexOf(m) * 1.37) % 6; }}/>
-            <canvas className="vid" ref={vidRef(m.id, 'canvas')}/>
-          </div>
-        </button>
-        <button className={`jelly-label ${active ? 'active' : ''} ${hub || live.current.size.w >= 760 ? 'below' : 'side'}`} ref={el => { labelRefs.current[m.id] = el; }} onClick={() => onModule(m.id)} tabIndex={-1}
-          onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }}
-          style={{'--mod': MOD_STYLE[m.id].color, transform: `translate3d(${j0.x - 66}px,${j0.y + j0.s * .36}px,0)`, opacity: j0.o}}>
-          <span className="jl-icon"><Icon name={m.icon} size={14}/></span>
-          <span className="jl-count">{sum.count}</span>
-          <span className="jl-name">{m.title}<em>{m.en}</em></span>
-          <span className="jl-sub">{sum.sub[0]} {sum.sub[1]} <em>{sum.sub[2]}</em></span>
-        </button>
-      </React.Fragment>;
-    })}
     {(t0.acols || []).map((col, k) => col.map((tp, i) => {
       // 祖先列卡片（水母列语法）：选中卡放大居中当主角，兄弟卡缩小排上下；点击任意卡切回该层
       const n = (ancLevels || [])[k]?.[i];
@@ -864,7 +859,65 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
             {bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}</>}
       </button>;
     })}
-  </div>;
+    </div>
+    {/* 水母独立顶层（用户令 10-15 三轮）：.scene 是 z-index:2 的层叠上下文，水母困在里面永远被
+        z=8 的面板压住——移出 scene 放进 jelly-layer(z=20)，真正压过搜索框/图例/详情栏等一切内容。
+        坐标系同 scene（absolute inset 0），rAF 写 transform 的逻辑不变；含静态兜底位（rAF 冻结保底可见） */}
+    <div className="jelly-layer">
+      {/* 线条随水母同层置顶（用户令 10-15 四轮）：神经丝/脉冲/波纹/触须不再被面板压住 */}
+      <svg className="threads" aria-hidden="true">
+        <defs>
+          <filter id="thread-blur" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3.2"/></filter>
+          <radialGradient id="pulse-out"><stop offset="0" stopColor={T.pulse.out[0]}/><stop offset=".4" stopColor={T.pulse.out[1]}/><stop offset="1" stopColor={T.pulse.out[1]} stopOpacity="0"/></radialGradient>
+          <radialGradient id="pulse-in"><stop offset="0" stopColor={T.pulse.in[0]}/><stop offset=".4" stopColor={T.pulse.in[1]}/><stop offset="1" stopColor={T.pulse.in[1]} stopOpacity="0"/></radialGradient>
+        </defs>
+        {MODULES.map(m => <g key={m.id} style={{color: MOD_STYLE[m.id].color}}>
+          <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], glow: el}; }} className="thread-glow" filter="url(#thread-blur)"/>
+          <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], core: el}; }} className="thread-core"/>
+          {[0, 1, 2].map(k => <circle key={k} r={k === 2 ? 4.5 : 5.5} fill={`url(#${k === 2 ? 'pulse-in' : 'pulse-out'})`} ref={el => { (pulseRefs.current[m.id] ||= [])[k] = el; }}/>)}
+          {[0, 1, 2].map(k => <path key={'rip' + k} className="jelly-rip" ref={el => { (ripRefs.current[m.id] ||= [])[k] = el; }}/>)}
+          {[0, 1].map(k => <circle key={'spk' + k} className="jelly-spark" r="2.2" ref={el => { (sparkRefs.current[m.id] ||= [])[k] = el; }}/>)}
+        </g>)}
+        <g className="grav" ref={gravRef} aria-hidden="true">
+          <circle className="grav-ring" r="30"/>
+          <circle className="grav-ring2" r="21"/>
+          <circle className="grav-core" r="8"/>
+        </g>
+        {(t0.acols ? ancLevels || [] : []).map((lvl, k) => lvl.map((n, i) => <g key={'at' + k + n.id}>
+          <path className="chain-thread dim" ref={el => { (aThreadRefs.current[k] ||= [])[i] = el; }}/>
+          <circle r="4" fill="url(#pulse-out)" ref={el => { (aThreadPulseRefs.current[k] ||= [])[i] = el; }}/>
+        </g>))}
+        {items.map((n, i) => <g key={n.id} style={{color: KINDS[n.kind].color}}>
+          <path className="fan-thread" ref={el => { fanRefs.current[i] = el; }}/>
+          {[0, 1].map(k => <circle key={k} r={k ? 3.5 : 4.5} fill={`url(#${k ? 'pulse-in' : 'pulse-out'})`} ref={el => { (fanPulseRefs.current[i] ||= [])[k] = el; }}/>)}
+        </g>)}
+      </svg>
+      {MODULES.map(m => {
+        const sum = summaries[m.id], active = live.current.mod === m.id;
+        const j0 = t0.jelly[m.id] || {x: 100, y: 100, s: 92, o: 1};
+        return <React.Fragment key={m.id}>
+          <button className={`jelly ${active ? 'active' : ''}`} ref={el => { jellyRefs.current[m.id] = el; }} onClick={() => onModule(m.id)}
+            onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }}
+            style={{'--mod': MOD_STYLE[m.id].color, transform: `translate3d(${j0.x - j0.s / 2}px,${j0.y - j0.s * .375}px,0) scale(${j0.s / 200})`, opacity: j0.o}}
+            aria-label={`${m.title} ${m.en}，${sum.count} 条`}>
+            <div className="jelly-inner" ref={el => { innerRefs.current[m.id] = el; }} style={{filter: MOD_STYLE[m.id].filter}}>
+              <video className="vsrc" ref={vidRef(m.id, 'video')} src={T.media.jelly} poster={T.media.jellyPoster} muted loop playsInline autoPlay preload="auto"
+                onLoadedMetadata={e => { e.currentTarget.currentTime = (MODULES.indexOf(m) * 1.37) % 6; }}/>
+              <canvas className="vid" ref={vidRef(m.id, 'canvas')}/>
+            </div>
+          </button>
+          <button className={`jelly-label ${active ? 'active' : ''} ${hub || live.current.size.w >= 760 ? 'below' : 'side'}`} ref={el => { labelRefs.current[m.id] = el; }} onClick={() => onModule(m.id)} tabIndex={-1}
+            onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }}
+            style={{'--mod': MOD_STYLE[m.id].color, transform: `translate3d(${j0.x - 66}px,${j0.y + j0.s * .36}px,0)`, opacity: j0.o}}>
+            <span className="jl-icon"><Icon name={m.icon} size={14}/></span>
+            <span className="jl-count">{sum.count}</span>
+            <span className="jl-name">{m.title}<em>{m.en}</em></span>
+            <span className="jl-sub">{sum.sub[0]} {sum.sub[1]} <em>{sum.sub[2]}</em></span>
+          </button>
+        </React.Fragment>;
+      })}
+    </div>
+    </>;
 }
 
 function Dock({graph, onGo}) {
