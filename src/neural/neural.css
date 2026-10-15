@@ -110,8 +110,10 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .zone-node.cur .zn-dot { box-shadow: 0 0 15px rgba(159, 242, 204, .95); }
 .jelly { position: absolute; z-index: 20; left: 0; top: 0; width: 200px; height: 150px; padding: 0; border: 0; background: none; transform-origin: 0 0; mix-blend-mode: screen; will-change: transform, opacity; transition: filter .3s; filter: brightness(calc(1 + var(--fl, 0) * .38)); }
 /* 水母在页面内容最上层（用户令 10-15 二轮）：盖过搜索框/图例/面包屑/详情栏，只低于顶栏与弹窗层 */
-/* 发光体的"阴影"逻辑：发光水母不投影，底部是照亮下方水域的自身色光晕（用体积感替代黑影的锚定感） */
+/* 发光体的"阴影"逻辑：发光水母不投影，底部是照亮下方水域的自身色光晕（用体积感替代黑影的锚定感）；
+   --pose 由 rAF 每帧写入当前姿态角（用户令十二轮）：光幕随身体旋转，横游时照亮身体后方而非屏幕下方 */
 .jelly::before { content: ''; position: absolute; inset: 4% -6% -26%; pointer-events: none; border-radius: 50%;
+  transform: rotate(var(--pose, 0deg));
   background: radial-gradient(ellipse 64% 36% at 50% 82%, color-mix(in srgb, var(--mod, #9ad) 17%, transparent), transparent 72%);
   opacity: calc(.55 + var(--fl, 0) * .5); }
 .jelly-inner { position: relative; width: 100%; height: 100%; -webkit-mask-image: radial-gradient(ellipse 68% 72% at 50% 46%, #000 42%, rgba(0, 0, 0, .5) 68%, transparent 92%); mask-image: radial-gradient(ellipse 68% 72% at 50% 46%, #000 42%, rgba(0, 0, 0, .5) 68%, transparent 92%); }

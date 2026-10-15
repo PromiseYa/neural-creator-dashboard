@@ -325,10 +325,14 @@ export function targets(L, t) {
         if (vn < 0) { const vAbs = Math.max(10, -vn); rm.vx += nx * (vAbs + vn); rm.vy += ny * (vAbs + vn); rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 2; }
       }
     });
-    // 吸附互斥（用户令十一轮）：鼠标同时靠近多只时只吸最近的一只——否则多只一起贴到鼠标上完全重叠
-    let attCandidate = null, attDist = 1e9;
+    // 吸附互斥（用户令十一轮）：鼠标同时靠近多只时只吸最近的一只——否则多只一起贴到鼠标上完全重叠。
+    // 十二轮修正：已吸住的水母显示位置=跟随点（漫游坐标已冻结），判定要用真实位置且独占——
+    // 否则吸着 A 走远后"最近"会变成别的近处水母 B，B 也被吸入=互斥失效
+    let attCandidate = null, attDist = 1e9, attHeld = false;
     if (L.smx != null) MODULES.forEach((m, i) => {
       const {rm, bx, by} = js[i];
+      if (rm.att) { attHeld = true; attCandidate = m.id; return; }
+      if (attHeld) return;
       const d = Math.hypot(L.smx - (bx + rm.x), L.smy - (by + rm.y));
       if (d < attDist) { attDist = d; attCandidate = m.id; }
     });
@@ -630,6 +634,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         const swayBase = L.stage === 'hub' ? (tg.att ? 2.2 : 3.2) : 1;   // module=第二形态基本静定
         const sway2 = !L.reduced ? swayBase * Math.sin(t * 1.35 + i * 1.3) : 0;
         const rot = hy + sway2;
+        if (el) el.style.setProperty('--pose', rot.toFixed(1) + 'deg');   // 光幕跟转（用户令十二轮）：底部色光晕随姿态旋转，始终照亮身体后方水域
         if (inner) inner.style.transform = `rotate(${rot}deg) scaleX(${MOD_STYLE[m.id].flip}) scaleY(${L.stage === 'hub' ? 1 : .92})`;
         if (lab) {
           const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
