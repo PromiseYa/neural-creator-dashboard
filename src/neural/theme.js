@@ -4,13 +4,14 @@ import {asset} from '../config';
 export const T = {
   kinds: {core: '#ecd9a6', folder: '#d9b6c1', post: '#c0b8ef', note: '#8fe0c0', idea: '#e8c48c', draft: '#a9d3e4', concept: '#e4e6e8', tag: '#98a6a1', ghost: '#70746f', task: '#b9b0f5', decision: '#f0c27a', memory: '#9cc8ee', service: '#ecb8de'},
   modules: {
-    // 每只水母独立染色（同一视频源用 hue/saturate/brightness 拉开）：紫罗兰/青绿/金橙/天蓝/浅粉紫；
-    // 触须与卡片连线用同款 color，整组色系一致（服务舱银白与文字白撞色→玫瑰粉又偏深偏暖，再调浅调冷成粉紫，与其余冷色同族）
-    tasks: {color: '#b9b0f5', filter: 'hue-rotate(215deg) saturate(2.4) brightness(.92)'},
-    kb: {color: '#8fe0c0', filter: 'hue-rotate(130deg) saturate(2.2) brightness(.9)'},
-    decisions: {color: '#f0c27a', filter: 'hue-rotate(-6deg) saturate(2.6) brightness(.98)'},
-    memory: {color: '#9cc8ee', filter: 'hue-rotate(165deg) saturate(2.3) brightness(.92)'},
-    services: {color: '#ecb8de', filter: 'hue-rotate(-60deg) saturate(2) brightness(1.06)'}
+    // R71 样式回原版（用户令 10-15）：水母滤镜回上游 v0.2.0-original 的淡雅五色（饱和度 1.x，批A/R28 的 2.2~2.6 撤销）；
+    // 按色调对应原版五值：tasks←works紫 / kb←methods绿 / decisions←ideas金 / memory←drafts蓝 / services←concepts银灰；
+    // color 字段保留现版（连线/触须/标签的模块色不变，与水母视频色不再强绑定）
+    tasks: {color: '#b9b0f5', filter: 'hue-rotate(215deg) saturate(1.1)'},
+    kb: {color: '#8fe0c0', filter: 'hue-rotate(118deg) saturate(1)'},
+    decisions: {color: '#f0c27a', filter: 'saturate(1)'},
+    memory: {color: '#9cc8ee', filter: 'hue-rotate(158deg) saturate(1.05)'},
+    services: {color: '#ecb8de', filter: 'hue-rotate(185deg) saturate(.3) brightness(1.15)'}
   },
   // palindrome 剪辑（正放+倒放拼接）：循环回到首帧时画面连续，消除播完一帧的跳变；原片保留作回退
   media: {orb: asset('media/orb_pal.mp4'), orbPoster: asset('media/orb.jpg'), jelly: asset('media/jellyfish_pal.mp4'), jellyPoster: asset('media/jellyfish.jpg')},
