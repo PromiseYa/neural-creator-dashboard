@@ -521,6 +521,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   const dustRef = useRef(null);
   const orbRef = useRef(null), jellyRefs = useRef({}), innerRefs = useRef({}), labelRefs = useRef({}), threadRefs = useRef({}), pulseRefs = useRef({}), sceneRef = useRef(null);
   const ripRefs = useRef({}), sparkRefs = useRef({}), gravRef = useRef(null);   // 引力可见化：水波纹/吸入光丝/光标视界环
+  const tentRefs = useRef({}), rimRefs = useRef({}), rimGlowRefs = useRef({});   // 程序化触手链+伞缘轮廓弧（批A⑥⑦）
   const itemRefs = useRef([]), fanRefs = useRef([]), fanPulseRefs = useRef([]);
   const aItemRefs = useRef([]), aThreadRefs = useRef([]), aThreadPulseRefs = useRef([]);
   const vids = useRef({});
@@ -608,14 +609,14 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         let fv = fv0;
         if (!L.reduced && L.smx != null) { const ddx = L.smx - x, ddy = L.smy - y; const dd = Math.hypot(ddx, ddy); if (dd < 150) fv = Math.max(fv, (1 - dd / 150) * .6); }
         if (el) el.style.setProperty('--fl', fv.toFixed(3));
-        // 真实水母姿态（用户令十一轮）：身体朝向运动方向（被吸=鼠标移动方向、漫游/惯性=游动方向），
-        // 触须自然拖在后；速度太低（静止）时缓慢回正朝上；叠加轻微交替摆动（伞体脉冲推进感）——
-        // 不再固定一种姿态。全角度+最短路径，软弹簧平滑转向
+        // 真实水母姿态：被吸/拖动=身体全角度朝向鼠标移动方向（触须自然拖在后）；
+        // 漫游/惯性=直立为主、只随横向速度微倾（用户令批A⑤：自主漂浮不头朝下，纵向移动不低头）；
+        // 静止时缓慢回正朝上；叠加轻微交替摆动（伞体脉冲推进感），软弹簧平滑转向
         const hyS = j.hyS || (j.hyS = {x: 0, v: 0});
         let dirT = null;
         const mvMag = Math.hypot(L.mvx || 0, L.mvy || 0);
-        if (tg.att && mvMag > 24) dirT = Math.atan2(L.mvy, L.mvx) * 180 / Math.PI + 90;   // +90=视频头朝上的补偿
-        else if (!tg.att) { const sp2 = Math.hypot(tg.vx || 0, tg.vy || 0); if (sp2 > 2.5) dirT = Math.atan2(tg.vy, tg.vx) * 180 / Math.PI + 90; }
+        if (tg.att && mvMag > 24) dirT = Math.atan2(L.mvy, L.mvx) * 180 / Math.PI + 90;   // +90=视频头朝上的补偿（拖动全角度保留）
+        else if (!tg.att) dirT = clamp((tg.vx || 0) * 2.6, -24, 24);   // 漫游横向微倾 ±24° 封顶，永不倒立
         let yawT = dirT == null ? 0 : dirT;
         yawT = hyS.x + (((yawT - hyS.x) % 360) + 540) % 360 - 180;   // 归一到最短旋转路径
         const hy = spring(hyS, yawT, dt, 6);   // 六轮弹簧刚度 12→6（用户令十三轮）：回正/转向更缓慢柔和丝滑
@@ -628,6 +629,55 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         if (el) el.style.setProperty('--pose', rot.toFixed(1) + 'deg');   // 光幕跟转：底部色光晕随姿态旋转，始终照亮身体后方水域
         if (inner) inner.style.transform = `rotate(${rot}deg) scaleX(${MOD_STYLE[m.id].flip}) scaleY(${(L.stage === 'hub' ? 1 : .92) * (1 + .045 * breathe)})`;
         j.breathe = breathe;
+        // —— 程序化触手+伞缘轮廓（批A⑥⑦）——
+        // 触手=伞底缘 5 条 verlet 物理链：锚点随姿态旋转到伞底，节点惯性拖尾+微重力+慢速漂摆——
+        // 拖动/游动时触手自然后甩漂浮（视频自带触手是贴身刚性动画，长触手的漂浮感只能程序补）；
+        // 伞缘弧=细线勾头部轮廓+宽淡衬光（随姿态同步旋转）
+        {
+          const ca = Math.cos(rot * Math.PI / 180), sa = Math.sin(rot * Math.PI / 180);
+          const TS = j.tents || (j.tents = Array.from({length: 5}, () =>
+            Array.from({length: 10}, () => ({x, y, px: x, py: y}))));
+          const segLen = Math.max(4, s * .105);
+          const tp2 = tentRefs.current[m.id] || [];
+          for (let k = 0; k < TS.length; k++) {
+            const chain = TS[k];
+            const lx = (k / 4 - .5) * s * .5, ly = s * .08;
+            chain[0].x = x + lx * ca - ly * sa; chain[0].y = y + lx * sa + ly * ca;
+            chain[0].px = chain[0].x; chain[0].py = chain[0].y;
+            for (let n = 1; n < chain.length; n++) {
+              const nd = chain[n];
+              const nvx = (nd.x - nd.px) * .88, nvy = (nd.y - nd.py) * .88;
+              nd.px = nd.x; nd.py = nd.y;
+              nd.x += nvx + (!L.reduced ? Math.sin(t * .8 + k * 1.4 + n * .55) * .22 : 0);
+              nd.y += nvy + s * .0022;
+            }
+            for (let it = 0; it < 2; it++) for (let n = 1; n < chain.length; n++) {
+              const a2 = chain[n - 1], b2 = chain[n];
+              let ddx = b2.x - a2.x, ddy = b2.y - a2.y;
+              const dd = Math.hypot(ddx, ddy) || .001, diff = (dd - segLen) / dd;
+              if (n === 1) { b2.x -= ddx * diff; b2.y -= ddy * diff; }
+              else { a2.x += ddx * diff * .5; a2.y += ddy * diff * .5; b2.x -= ddx * diff * .5; b2.y -= ddy * diff * .5; }
+            }
+            const el = tp2[k];
+            if (el) {
+              let dd2 = '';
+              for (let n = 0; n < chain.length; n++) dd2 += (n ? 'L' : 'M') + chain[n].x.toFixed(1) + ',' + chain[n].y.toFixed(1);
+              el.setAttribute('d', dd2);
+              el.style.opacity = (clamp(o, 0, 1) * .5).toFixed(3);
+            }
+          }
+          const rp = rimRefs.current[m.id], rgp = rimGlowRefs.current[m.id];
+          if (rp) {
+            let dd3 = '';
+            for (let k = 0; k <= 20; k++) {
+              const aa = Math.PI + k / 20 * Math.PI;   // 上半弧：左缘→顶→右缘
+              const lx2 = Math.cos(aa) * s * .44, ly2 = -s * .045 + Math.sin(aa) * s * .30;
+              dd3 += (k ? 'L' : 'M') + (x + lx2 * ca - ly2 * sa).toFixed(1) + ',' + (y + lx2 * sa + ly2 * ca).toFixed(1);
+            }
+            rp.setAttribute('d', dd3); rp.style.opacity = (clamp(o, 0, 1) * .55).toFixed(3);
+            if (rgp) { rgp.setAttribute('d', dd3); rgp.style.opacity = (clamp(o, 0, 1) * .14).toFixed(3); }
+          }
+        }
         if (lab) {
           const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
           const hub = L.stage === 'hub', narrow = L.size.w < 760;
@@ -911,6 +961,9 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           <radialGradient id="pulse-in"><stop offset="0" stopColor={T.pulse.in[0]}/><stop offset=".4" stopColor={T.pulse.in[1]}/><stop offset="1" stopColor={T.pulse.in[1]} stopOpacity="0"/></radialGradient>
         </defs>
         {MODULES.map(m => <g key={m.id} style={{color: MOD_STYLE[m.id].color}}>
+          {[0, 1, 2, 3, 4].map(k => <path key={'tnt' + k} className="jelly-tent" ref={el => { (tentRefs.current[m.id] ||= [])[k] = el; }}/>)}
+          <path className="jelly-rim-glow" ref={el => { rimGlowRefs.current[m.id] = el; }}/>
+          <path className="jelly-rim" ref={el => { rimRefs.current[m.id] = el; }}/>
           <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], glow: el}; }} className="thread-glow" filter="url(#thread-blur)"/>
           <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], core: el}; }} className="thread-core"/>
           {[0, 1, 2].map(k => <circle key={k} r={k === 2 ? 4.5 : 5.5} fill={`url(#${k === 2 ? 'pulse-in' : 'pulse-out'})`} ref={el => { (pulseRefs.current[m.id] ||= [])[k] = el; }}/>)}
@@ -964,7 +1017,35 @@ function Dock({graph, onGo}) {
   const [q, setQ] = useState('');
   const [cards, setCards] = useState(null);
   const typing = useRef(null);
-  const ask = text => { if (text.trim()) setCards({q: text, list: askGraph(graph, text)}); };
+  const kbCtl = useRef(null);   // 8342 检索串行化：新查询掐掉上一发（kbserve 并发排队会互相污染时序）
+  // 混合查询（批D-4）：本地图谱规则先行出卡，同时异步打 8342 全库语义检索（冷模型 10~30s 常态，
+  // 占位卡先挂"检索中"）——命中后替换为知识库命中卡，KB 文件名能对上图谱节点的直接给可点 chip
+  const ask = text => {
+    if (!text.trim()) return;
+    setCards({q: text, list: askGraph(graph, text)});
+    if (kbCtl.current) kbCtl.current.abort();
+    const ctl = kbCtl.current = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 32000);
+    const wait = {tone: 'info', title: '知识库检索中…', en: 'KB searching', text: '8342 冷模型检索约 10~30 秒，结果到了自动补上。', items: []};
+    setCards(prev => prev && prev.q === text ? {...prev, list: [...prev.list, wait]} : prev);
+    fetch(`/kb/search?q=${encodeURIComponent(text)}&top=6&rerank=false`, {signal: ctl.signal})
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+      .then(d => {
+        const hits = d?.hits || [];
+        const base = p => String(p || '').split(/[\\/]/).pop().replace(/\.md$/, '');
+        const items = [], names = [], meta = [];
+        for (const h of hits) {
+          const b = base(h.meta?.source_path);
+          const nd = b && graph.nodes.find(n => n.kind === 'note' && base(n.path) === b);
+          if (nd) { items.push(nd.id); names.push(nd.short || nd.title); meta.push('相似 ' + Number(h.score || 0).toFixed(2)); }
+        }
+        const card = hits.length ? {tone: 'info', title: `知识库命中 ${hits.length} 篇`, en: 'KB search · kbserve',
+          text: hits.map(h => base(h.meta?.source_path)).slice(0, 6).join(' · '), items, names, meta} : null;
+        setCards(prev => prev && prev.q === text ? {...prev, list: (prev.list || []).filter(c => c !== wait).concat(card || [])} : prev);
+      })
+      .catch(() => setCards(prev => prev && prev.q === text ? {...prev, list: (prev.list || []).filter(c => c !== wait)} : prev))
+      .finally(() => clearTimeout(timer));
+  };
   const typeAsk = text => {
     clearInterval(typing.current);
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setQ(text); ask(text); return; }
@@ -981,7 +1062,7 @@ function Dock({graph, onGo}) {
   const kpis = [['内容节点', 'Notes', s.content], ['连接', 'Links', s.links], ['双向共振', 'Mutual', s.mutual], ['未创建', 'Unresolved', s.ghosts]];
   return <div className="dock">
     {cards && <section className="ask-results glass" aria-live="polite">
-      <header><span><Icon name="spark" size={14}/>图谱分析 <em>Graph analysis</em></span><small>本地规则检索 · Local rules, no AI</small><button className="icon-btn" aria-label="关闭分析" onClick={() => setCards(null)}><Icon name="close" size={14}/></button></header>
+      <header><span><Icon name="spark" size={14}/>图谱分析 <em>Graph analysis</em></span><small>图谱规则 + KB 混合检索 · Graph + KB search</small><button className="icon-btn" aria-label="关闭分析" onClick={() => setCards(null)}><Icon name="close" size={14}/></button></header>
       <div className="ask-cards">{cards.list.map((c, i) => <article key={i} className={`ask-card tone-${c.tone}`} style={{animationDelay: i * 90 + 'ms'}}>
         <h4>{c.title} <em>{c.en}</em></h4>
         <p>{c.text}</p>

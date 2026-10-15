@@ -55,7 +55,7 @@ export async function fetchEcosystem() {
     {id: 'panel', name: '老面板 8330', ok: panelOK, group: 'core', desc: '现役写接口所在', url: 'http://127.0.0.1:8330/'},
     {id: 'kbserve', name: '检索服务 8342', ok: kbOK, group: 'core', desc: 'KB 语义+关键词混合检索'},
     ...(data.workers || []).filter(w => !w.retired && w.type === 'resident')
-      .map(w => ({id: w.id, name: `${w.emoji || '🔧'} ${w.name}`, ok: w.hb_state === 'ok', group: 'worker', desc: w.desc || '', state: w.hb_state}))
+      .map(w => ({id: w.id, name: `${w.emoji || '🔧'} ${w.name}`, ok: w.hb_state === 'ok', group: 'worker', desc: w.desc || '', state: w.hb_state, url: w.ui || undefined}))   // ui→url（批C）：registry 里 VPN路由 8321/驾驶舱 8330/悬浮球 float.html/RAG检索 8341 四个网页入口接进服务舱
   ];
 
   return {

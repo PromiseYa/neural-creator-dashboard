@@ -278,7 +278,7 @@ function entitiesPlugin() {
             const workers = entries.map(w => {
               const hb = latest.get(w.id);
               const iv = hb?.expected_interval || HB_DEFAULT_IV;
-              return {id: w.id, name: w.name, type: w.type, emoji: w.emoji, desc: w.desc,
+              return {id: w.id, name: w.name, type: w.type, emoji: w.emoji, desc: w.desc, ui: w.ui || null,
                 retired: !!w.retired, hb_ts: hb?.ts ?? null,
                 hb_state: hb ? hbState(hb.ts, iv) : 'noreport'};
             });
