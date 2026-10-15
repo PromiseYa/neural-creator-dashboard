@@ -114,19 +114,18 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
    --pose 由 rAF 每帧写入当前姿态角（用户令十二轮）：光幕随身体旋转，横游时照亮身体后方而非屏幕下方 */
 .jelly::before { content: ''; position: absolute; inset: 4% -6% -26%; pointer-events: none; border-radius: 50%;
   transform: rotate(var(--pose, 0deg));
-  /* 三层错位光幕（十四轮第4条）：无单一圆弧边界，像真的光从身体漫射下来 */
+  /* 三层错位光幕（性能版，用户令十六轮）：去 blur——大伪元素每帧随姿态旋转重算是 GPU 大户，
+     三层渐变自身已柔发散（壁纸卡死根因修复） */
   background:
     radial-gradient(ellipse 92% 54% at 46% 86%, color-mix(in srgb, var(--mod, #9ad) 10%, transparent), transparent 82%),
     radial-gradient(ellipse 80% 46% at 56% 82%, color-mix(in srgb, var(--mod, #9ad) 9%, transparent), transparent 78%),
     radial-gradient(ellipse 68% 38% at 50% 88%, color-mix(in srgb, var(--mod, #9ad) 7%, transparent), transparent 74%);
-  filter: blur(18px);
   opacity: calc(.55 + var(--fl, 0) * .5); }
 /* inner 不再叠蒙版（用户令十五轮）：蒙版只留 .vid 一层——双层叠加的半透黑灰段就是"背景板"感来源 */
 .jelly-inner { position: relative; width: 100%; height: 100%; }
-/* 视频画布（用户令十五轮）：screen 混合=黑底自动全透（无背景板），对比度增强吃掉灰雾；
-   以伞体(26%)为锚 scaleY 1.18 向下拉伸=触手加长，柳絮般拖尾；单层快速跌落蒙版减少半透黑灰段 */
+/* 视频画布（性能版，用户令十六轮）：screen 混合只保留容器层一层（嵌套 blend 是双倍 GPU 合成），
+   黑底透明效果不变；以伞体(26%)为锚 scaleY 1.18 向下拉伸=触手加长 */
 .jelly .vid { width: 100%; height: 100%; display: block; object-fit: cover;
-  mix-blend-mode: screen;
   filter: brightness(1.15) contrast(1.28);
   transform: scaleY(1.18); transform-origin: 50% 26%;
   -webkit-mask-image: radial-gradient(ellipse 64% 68% at 50% 44%, #000 36%, rgba(0, 0, 0, .45) 56%, rgba(0, 0, 0, .1) 72%, transparent 92%);
