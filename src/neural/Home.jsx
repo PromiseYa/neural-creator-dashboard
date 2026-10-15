@@ -160,18 +160,11 @@ export function moduleItems(graph, modId, zone) {
     }
     return [];
   }
-  // 服务舱两级钻取（与知识库分区同款语法）：第一层=核心服务/常驻工作者两张分类卡，
-  // 第二层=该分类下的服务卡。分类用中文标题当 zone（面包屑显示用），服务归属靠 service.group。
-  if (m.kind === 'service' && zone !== undefined) {
+  // 服务舱平铺（用户令 10-15：不再分类）：核心服务在前、常驻工作者在后，一级直接显示全部服务卡。
+  // 有 url 的服务（工作站/老面板）卡上带可打开链接；worker 数据源暂无地址字段，后续补 url 即自动显示。
+  if (m.kind === 'service') {
     const all = graph.nodes.filter(n => n.kind === 'service');
-    if (!zone) {
-      const grp = g => all.filter(n => n.service?.group === g);
-      const card = (id, title, list) => ({id, kind: 'folder', title, short: title, count: list.length,
-        online: list.filter(n => n.service?.ok).length, path: title, level: 2});
-      return [card('f:svc:core', '核心服务', grp('core')), card('f:svc:worker', '常驻工作者', grp('worker'))];
-    }
-    const g = zone === '核心服务' ? 'core' : zone === '常驻工作者' ? 'worker' : null;
-    return all.filter(n => n.service?.group === g);
+    return [...all.filter(n => n.service?.group === 'core'), ...all.filter(n => n.service?.group === 'worker')];
   }
   const list = graph.nodes.filter(n => n.kind === m.kind);
   if (m.kind === 'post') list.sort((a, b) => String(a.date).localeCompare(String(b.date)));
@@ -258,12 +251,12 @@ export function targets(L, t) {
     const js = MODULES.map((m, i) => {
       const rm = RM[m.id] || (RM[m.id] = {x: 0, y: 0, vx: 4, vy: 0, ang: Math.random() * 6.28, spd: 6, turnAt: 0, targetAng: 0, targetSpd: 7});
       if (swim) {
-        if (t >= rm.turnAt) { rm.turnAt = t + 3.5 + Math.random() * 5.5; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 4 + Math.random() * 9; }   // 随机掉头
+        if (t >= rm.turnAt) { rm.turnAt = t + 4.5 + Math.random() * 6.5; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 2.2 + Math.random() * 5; }   // 随机掉头（整体放缓：目标速度上限 13→7.2，转向间隔拉长）
         let da = rm.targetAng - rm.ang; da = Math.atan2(Math.sin(da), Math.cos(da));
-        rm.ang += clamp(da, -1.1 * dt, 1.1 * dt);   // 受限角速度=转弯柔和
+        rm.ang += clamp(da, -.75 * dt, .75 * dt);   // 受限角速度=转弯更柔（1.1→0.75）
         rm.spd += (rm.targetSpd - rm.spd) * Math.min(1, dt * .5);
         rm.vx += (Math.cos(rm.ang) * rm.spd - rm.vx) * Math.min(1, dt * .8);
-        rm.vy += (Math.sin(rm.ang) * rm.spd * .45 - rm.vy) * Math.min(1, dt * .8);
+        rm.vy += (Math.sin(rm.ang) * rm.spd * .4 - rm.vy) * Math.min(1, dt * .8);
         rm.x += rm.vx * dt; rm.y += rm.vy * dt;
         const dHome = Math.hypot(rm.x, rm.y);   // 远超 600px 才有极弱归心（防集体漂到一侧，平时感知不到）
         if (dHome > 600) { rm.x -= rm.x / dHome * (dHome - 600) * dt * .5; rm.y -= rm.y / dHome * (dHome - 600) * dt * .5; }
@@ -285,7 +278,12 @@ export function targets(L, t) {
         const nx = dx / d, ny = dy / d, push = (minD - d) / 2;
         A.rm.x += nx * push; A.rm.y += ny * push; B.rm.x -= nx * push; B.rm.y -= ny * push;
         const dv = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
-        if (dv < 0) { A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv; }   // 仅相互接近时弹开
+        if (dv < 0) {
+          A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv;   // 仅相互接近时弹开
+          // 轻碰也可见：分离速度不足 14px/s 时沿法线补足（真实水母相触后的缓慢推开）
+          const dv2 = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
+          if (dv2 < 14) { const add = (14 - dv2) / 2; A.rm.vx += nx * add; A.rm.vy += ny * add; B.rm.vx -= nx * add; B.rm.vy -= ny * add; }
+        }
       }
     }
     // 主神经（光球↔各水母的神经丝）也是实体：游进别的神经丝走廊=被碰到——沿法线弹出+速度反射，
@@ -306,16 +304,20 @@ export function targets(L, t) {
           const nx = dx / d, ny = dy / d, push = minD - d;
           rm.x += nx * push; rm.y += ny * push; abs[i][0] += nx * push; abs[i][1] += ny * push;
           const vn = rm.vx * nx + rm.vy * ny;
-          if (vn < 0) { rm.vx -= 2 * vn * nx; rm.vy -= 2 * vn * ny; rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; }
+          if (vn < 0) { const vAbs = Math.max(9, -vn); rm.vx += nx * (vAbs + vn); rm.vy += ny * (vAbs + vn); rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; }   // 轻擦神经丝也有可见反弹（法向反射速度保底 9px/s）
         }
       }
     }
     MODULES.forEach((m, i) => {
       const {rm, bx, by} = js[i];
+      // 左右摆动严格对称（用户令 10-15）：零均值正弦摆动，摆幅随速度增大但无持久单向偏置——
+      // 真实水母的推进=伞体脉冲式左右交替摆，去掉了旧的"头随移动方向持久倾倒"偏置项
+      const swayAmp = 5 + Math.min(3, Math.abs(rm.vx) * .3);
       const jj = {x: bx + rm.x, y: by + rm.y + swim * 14 * Math.sin(t * .8 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1,
-        tilt: swim * 4 * Math.sin(t * .6 + i) + clamp(rm.vx * 1.4, -16, 16)};   // 头随移动方向倾倒
-      // 黑洞式吸引：越近拉力越陡（u^1.8），水母缩小、头转向光标——被引力场缓缓吞入的错觉
-      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 300 && d > 2) { const u = 1 - d / 300; const f = Math.pow(u, 1.8) * 34; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .22; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .4, -18, 18); } }
+        tilt: swim * swayAmp * Math.sin(t * 1.35 + i * 1.3), pull: 0};
+      // 黑洞式吸引（感应半径 150px，用户令：不再离很远就跑过来）：越近拉力越陡（u^1.8），水母缩小；
+      // 头转向光标不在即时偏置 tilt，改由渲染端弹簧驱动（灵动、带轻微过冲）——jj.pull 传吸引强度
+      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 150 && d > 2) { const u = 1 - d / 150; const f = Math.pow(u, 1.8) * 20; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .2; jj.pull = u; } }
       jj.tilt = clamp(jj.tilt, -26, 26);
       res.jelly[m.id] = jj;
     });
@@ -333,10 +335,10 @@ export function targets(L, t) {
     const colX = ox + 158, gap = Math.min(122, (H - 150) / 5);
     MODULES.forEach((m, i) => {
       const sel = m.id === L.mod, k = slotOf(L.mod, m.id);
-      // 左右摇摆漂浮（幅 12px，选中水母也漂，触须有弹簧自然跟随）；上下起伏 9px；相位错开
-      const jj = {x: colX + (sel ? 16 : 0) + swim * 12 * Math.sin(t * .26 + i * 1.7), y: cy + (k - 2) * gap + swim * 9 * Math.sin(t * .9 + i * 2), s: sel ? 128 : 92, o: sel ? 1 : .6, tilt: swim * 3 * Math.sin(t * .6 + i) + swim * 4 * Math.cos(t * .26 + i * 1.7)};   // 末项=头随横摆方向倾倒
-      // 侧列同款黑洞吸引（温和版）：拉力 u^1.4 限 16px，缩小 12%，头转向光标（与 hub 同款 atan2(dx,-dy)）
-      if (L.smx != null) { const dx = L.smx - jj.x, dy = L.smy - jj.y, d = Math.hypot(dx, dy); if (d < 240 && d > 2) { const u = 1 - d / 240; const f = Math.pow(u, 1.4) * 16; jj.x += dx / d * f; jj.y += dy / d * f; jj.s *= 1 - u * .12; jj.tilt += clamp(Math.atan2(dx, -dy) * 180 / Math.PI * u * .3, -12, 12); } }
+      // 第二形态（点击水母进模块后，用户令）：摆动/漂浮幅度降到 25%——"不能乱动"；零均值对称摆
+      const F2 = .25;
+      const jj = {x: colX + (sel ? 16 : 0) + swim * 12 * Math.sin(t * .26 + i * 1.7) * F2, y: cy + (k - 2) * gap + swim * 9 * Math.sin(t * .9 + i * 2) * F2, s: sel ? 128 : 92, o: sel ? 1 : .6,
+        tilt: (swim * 3 * Math.sin(t * .6 + i) + swim * 4 * Math.cos(t * .26 + i * 1.7)) * F2, pull: 0};
       res.jelly[m.id] = jj;
     });
     // 伞状条目以右侧分析栏为基准排在它左边约 90px 处（条目最宽约 270px），触须拉长、画面左右均衡；
@@ -344,9 +346,9 @@ export function targets(L, t) {
     // 长清单不压缩间距：固定间距往下排，超出视口的部分用滚轮平移（panY），像一张往下无限延伸的画布。
     const panelLeft = W - clamp(W * .30, 360, 440) - 44;
     const n = L.items.length;
-    // 清单垂直间距全层统一 80px（分类层/清单层/深层一致，长清单靠滚轮平移）——
-    // 自适应间距会让 2 张卡 120px、10 张 62px，层与层之间跳变=视觉混乱
-    const fgap = 80;
+    // 清单垂直间距自适应（用户令 10-15：最后一层内容默认居中放置）：短清单保持 80px 节奏，
+    // 长清单（如服务舱 13 项）压缩到 42~80px 让整列垂直居中进一屏——不再从顶部起排靠滚轮找
+    const fgap = clamp((H - 300) / Math.max(n - 1, 1), 42, 80);
     const selOpen = L.stage === 'note';
     // kb 目录钻取（宽屏）：每一层完整复刻"水母层"语法——选中卡调换到中间放大当该列主角（同选中水母居中），
     // 同层兄弟卡保持原尺寸、变暗排在上下（同未选水母 o=.6；深列放不下才缩），下一层在右侧下一个槽位
@@ -367,9 +369,8 @@ export function targets(L, t) {
     const SX = [fanBase, fanBase + 240, fanBase + 480];
     const fit = !zd || SX[zd] + 300 <= W - 20;   // 300=内容卡实际最宽(~310 含徽章)，层级整体离屏右缘留 20px 呼吸
     const span = Math.max(0, n - 1) * fgap;
-    // 清单顶部让位：不越过最上方水母（其下方留 70px）——鼠标点水母不被细项卡挡住，触须也更舒展
-    const topJelly = cy - 2 * gap;
-    let x = fanBase, y0 = Math.max(cy - span / 2, topJelly + 70), fg2 = fgap, fsc = 1;
+    // 清单顶部只让位顶栏（水母已置顶压在内容上，清单可延伸到水母下方——居中优先）
+    let x = fanBase, y0 = Math.max(cy - span / 2, 90), fg2 = fgap, fsc = 1;
     res.acols = null;
     if (zd && fit) {
       x = SX[zd];
@@ -473,10 +474,23 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       L.dt = dt;   // 供水母自由游弋物理积分（targets 内使用）
       if (!L.paused) L.time += dt;
       const t = L.time, since = (now - L.t0) / 1000;
-      // 鼠标吸引的缓速跟随点（低通滤波）：水母"缓慢跟着移动"的感觉来自这里，直接跟鼠标会显得机械
-      if (L.mx == null) { L.smx = null; }
-      else if (L.smx == null) { L.smx = L.mx; L.smy = L.my; }
-      else { const e = Math.min(1, dt * 2); L.smx += (L.mx - L.smx) * e; L.smy += (L.my - L.smy) * e; }
+      // 鼠标吸引的缓速跟随点（用户令 10-15 升级）：前置预测追逐 + 速度自适应——
+      // 鼠标速度指数平滑后沿速度方向领先一个时距（上限 90px，快移预测多、慢移趋零），
+      // 跟随系数随速度放大（快→跟得紧，慢→绵柔丝滑），从公式上消除"追不上"与"过冲弹跳"
+      if (L.mx == null) { L.smx = null; L.mvx = 0; L.mvy = 0; }
+      else if (L.smx == null) { L.smx = L.mx; L.smy = L.my; L.pmx = L.mx; L.pmy = L.my; L.mvx = 0; L.mvy = 0; }
+      else {
+        const idt = Math.max(dt, .001);
+        const sm = Math.min(1, dt * 9);
+        L.mvx = (L.mvx || 0) + ((L.mx - (L.pmx ?? L.mx)) / idt - (L.mvx || 0)) * sm;
+        L.mvy = (L.mvy || 0) + ((L.my - (L.pmy ?? L.my)) / idt - (L.mvy || 0)) * sm;
+        L.pmx = L.mx; L.pmy = L.my;
+        const spd = Math.hypot(L.mvx, L.mvy);
+        const lead = Math.min(90, Math.sqrt(spd) * 2.3);
+        const px = L.mx + (spd > 1 ? L.mvx / spd * lead : 0), py = L.my + (spd > 1 ? L.mvy / spd * lead : 0);
+        const e = Math.min(1, dt * (1.5 + 2.5 * Math.min(1, spd / 1400)));
+        L.smx += (px - L.smx) * e; L.smy += (py - L.smy) * e;
+      }
       const T = targets(L, t);
       L.noteG = T.noteG || 1;   // 笔记模式整组缩放系数：水母标签同步缩放（文本框不缩会挤压且线条起点错位）
       if (T.fan) L.fanMeta = {panMax: T.fan.panMax || 0, n: L.items.length};
@@ -521,9 +535,15 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         const fv0 = !L.reduced && t < fl.until ? Math.sin((1 - (fl.until - t) / 1.1) * Math.PI) : 0;
         // 吸积增亮：光标逼近（黑洞视界）时水母自体光亮抬升——先被点亮再被吞入
         let fv = fv0;
-        if (!L.reduced && L.smx != null) { const ddx = L.smx - x, ddy = L.smy - y; const dd = Math.hypot(ddx, ddy); if (dd < 260) fv = Math.max(fv, (1 - dd / 260) * .6); }
+        if (!L.reduced && L.smx != null) { const ddx = L.smx - x, ddy = L.smy - y; const dd = Math.hypot(ddx, ddy); if (dd < 150) fv = Math.max(fv, (1 - dd / 150) * .6); }
         if (el) el.style.setProperty('--fl', fv.toFixed(3));
-        if (inner) inner.style.transform = `rotate(${tg.tilt}deg) scaleX(${MOD_STYLE[m.id].flip})`;
+        // 头转向光标（灵动弹簧，用户令 10-15）：目标角=朝向光标×吸引强度，软弹簧带轻微过冲摆过去，
+        // 再叠被吸引时的头部微颤（活物感）——真实水母的转向是脉冲式，不是刚体偏转
+        const hyS = j.hyS || (j.hyS = {x: 0, v: 0});
+        const yawT = tg.pull ? clamp(Math.atan2(L.smx - x, -(L.smy - y)) * 180 / Math.PI, -38, 38) * Math.min(1, tg.pull * 1.4) : 0;
+        const hy = spring(hyS, yawT, dt, 16);
+        const tremor = tg.pull ? 2.2 * Math.sin(t * 2.6 + i) * Math.min(1, tg.pull * 1.5) : 0;
+        if (inner) inner.style.transform = `rotate(${clamp(tg.tilt + hy + tremor, -30, 30)}deg) scaleX(${MOD_STYLE[m.id].flip}) scaleY(${L.stage === 'hub' ? 1 : .92})`;
         if (lab) {
           const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
           const hub = L.stage === 'hub', narrow = L.size.w < 760;
@@ -539,7 +559,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         // 驱动三层特效——水母伞缘水波纹（拉得越强纹越密）、吸入光丝（光点漂向光标）、光标吸积环 ——
         let pu = 0;
         if (L.smx != null && !L.reduced) {
-          const R = L.stage === 'hub' ? 300 : 240;
+          const R = 150;
           const gdx = L.smx - x, gdy = L.smy - y, gdd = Math.hypot(gdx, gdy);
           if (gdd < R && gdd > 2) pu = 1 - gdd / R;
         }
@@ -548,7 +568,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         // 波纹周期 2.2s 慢扩散（用户令"再慢一点"），拉力越强发得越密
         const rips = ripRefs.current[m.id] || [];
         const spks = sparkRefs.current[m.id] || [];
-        const ripLive = c => c && c._t && t - c._t < 2.3;
+        const ripLive = c => c && c._t && t - c._t < 3.5;
         const sparkLive = c => c && c._t && t - c._t < 1.15;
         if (pu > .02 || rips.some(ripLive) || spks.some(sparkLive)) {
           if (pu > .02 && t >= (j.ripNext || 0)) {
@@ -556,13 +576,24 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
             const rc = rips.find(c => !ripLive(c));
             if (rc) rc._t = t;
           }
-          rips.forEach(c => {
+          // 波浪线水纹（用户令 10-15）：圆形涟漪改为边缘带正弦起伏的波浪环，
+          // 相位缓慢滚动、扩散周期 3.4s、峰值透明度调柔——水面波纹感而非声呐圈
+          rips.forEach((c, ri) => {
             if (!c) return;
-            const ph = t - (c._t || -9) > 0 ? Math.min(1, (t - c._t) / 2.2) : 1;
+            const ph = t - (c._t || -9) > 0 ? Math.min(1, (t - c._t) / 3.4) : 1;
             const on = c._t && ph < 1 && pu > .02;
-            c.setAttribute('cx', x); c.setAttribute('cy', y);
-            c.setAttribute('r', Math.max(1, s * .34 + s * .82 * (1 - Math.pow(1 - ph, 2.2))));
-            c.style.opacity = on ? (1 - ph) * .48 * Math.min(1, pu * 3.5) : 0;
+            if (!on) { if (c.style.opacity !== '0') c.style.opacity = 0; return; }
+            const rr = s * .34 + s * .82 * (1 - Math.pow(1 - ph, 2.4));
+            const amp = 2.5 + 4.5 * Math.sin(Math.min(1, ph * 1.25) * Math.PI);   // 振幅先增后衰
+            const roll = t * .9 + ri * 2.1;
+            let d = '';
+            for (let k = 0; k <= 48; k++) {
+              const a = k / 48 * Math.PI * 2;
+              const r2 = rr + Math.sin(a * 5 + roll) * amp;
+              d += (k ? 'L' : 'M') + (x + Math.cos(a) * r2).toFixed(1) + ',' + (y + Math.sin(a) * r2 * .92).toFixed(1);
+            }
+            c.setAttribute('d', d + 'Z');
+            c.style.opacity = (1 - ph) * .34 * Math.min(1, pu * 3.5);
           });
           spks.forEach((c, k) => {
             if (!c) return;
@@ -575,9 +606,9 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
             const e = ph * ph * (3 - 2 * ph);   // smoothstep：先缓后急，被"吸进去"
             const rim = s * .4, sa = c._a || 0;
             const sx0 = x + Math.cos(sa) * rim, sy0 = y + Math.sin(sa) * rim;
-            const cx0 = (sx0 + L.smx) / 2 + Math.sin(sa + 1.7) * 24, cy0 = (sy0 + L.smy) / 2 + Math.cos(sa + 1.2) * 24;
-            c.setAttribute('cx', bez(sx0, cx0, cx0, L.smx, e));
-            c.setAttribute('cy', bez(sy0, cy0, cy0, L.smy, e));
+            const cx0 = (sx0 + L.mx) / 2 + Math.sin(sa + 1.7) * 24, cy0 = (sy0 + L.my) / 2 + Math.cos(sa + 1.2) * 24;
+            c.setAttribute('cx', bez(sx0, cx0, cx0, L.mx, e));
+            c.setAttribute('cy', bez(sy0, cy0, cy0, L.my, e));
             c.style.opacity = pu > .04 ? Math.sin(Math.min(1, ph) * Math.PI) * .8 : 0;
           });
         }
@@ -603,7 +634,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           pulses.forEach((c, k) => {
             if (!c) return;
             const inbound = k === 2;
-            let u = ((t * (inbound ? .23 : .31) + k * .5 + i * .17) % 1);
+            let u = ((t * (inbound ? .45 : .55) + k * .5 + i * .17) % 1);   // 提速一圈 1.8~2.2s（用户令：光路不能像卡住）
             if (inbound) u = 1 - u;
             c.setAttribute('cx', bez(x1, c1x, c2x, x2, u)); c.setAttribute('cy', bez(y1, c1y, c2y, y2, u));
             c.style.opacity = L.reduced || L.paused ? 0 : vis * Math.sin(u * Math.PI);
@@ -621,7 +652,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         if (target > 0 || cur > .004) {
           gv._op = Math.max(target, cur - dt * 1.4);   // 淡入直接跟、淡出走平滑
           gv.style.opacity = gv._op.toFixed(3);
-          gv.style.transform = `translate3d(${L.smx || 0}px,${L.smy || 0}px,0)`;
+          gv.style.transform = `translate3d(${L.mx || 0}px,${L.my || 0}px,0)`;   // 零延迟直跟鼠标（用户令：黑洞不能有延迟），平滑只给水母跟随点
           const r1 = gv.children[0], r2 = gv.children[1];
           if (r1) r1.style.strokeDashoffset = -((t * 26) % 43);
           if (r2) r2.style.strokeDashoffset = (t * 17) % 27;
@@ -715,8 +746,11 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       }
       // 本帧没渲染到的卡片置 off（离开当前列/祖先列），下次再进当前列时从源头重生
       for (const [id, st] of vis) if (!touched.has(id)) st.role = 'off';
-      // 光球与水母的视频画面
-      for (const pair of Object.values(vids.current)) paintVideo(pair);
+      // 光球与水母的视频画面；水母第二形态（module/note）游动速度减半——视觉上"安静下来的水母"
+      for (const [vid, pair] of Object.entries(vids.current)) {
+        if (pair.video) pair.video.playbackRate = vid === 'orb' ? 1 : (L.stage === 'hub' ? 1 : .5);
+        paintVideo(pair);
+      }
     };
     // 每帧先排好下一帧再执行：某一帧出错也不会让光球和水母停住
     let warned = false;
@@ -737,7 +771,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   // 静态兜底位置：渲染帧（rAF）冻结时（如窗口被遮挡）各元素也按最终布局可见可点，正常时 rAF 接管动画
   const t0 = targets(live.current, 0);
   return <div className={`scene stage-${live.current.stage}`} ref={sceneRef}>
-    <div className="orb clickable" ref={orbRef} role="button" tabIndex={-1} aria-label="回到星图主页" title="回到星图主页"
+    <div className="orb clickable" ref={orbRef} role="button" tabIndex={-1} aria-label="回到星图主页"
       onClick={() => onHome()} onPointerEnter={() => { live.current.hover = 'core'; }} onPointerLeave={() => { live.current.hover = null; }}>
       <div className="orb-halo"/>
       <video className="vsrc" ref={vidRef('orb', 'video')} src={T.media.orb} poster={T.media.orbPoster} muted loop playsInline autoPlay preload="auto"/>
@@ -754,7 +788,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], glow: el}; }} className="thread-glow" filter="url(#thread-blur)"/>
         <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], core: el}; }} className="thread-core"/>
         {[0, 1, 2].map(k => <circle key={k} r={k === 2 ? 4.5 : 5.5} fill={`url(#${k === 2 ? 'pulse-in' : 'pulse-out'})`} ref={el => { (pulseRefs.current[m.id] ||= [])[k] = el; }}/>)}
-        {[0, 1, 2].map(k => <circle key={'rip' + k} className="jelly-rip" r="10" ref={el => { (ripRefs.current[m.id] ||= [])[k] = el; }}/>)}
+        {[0, 1, 2].map(k => <path key={'rip' + k} className="jelly-rip" ref={el => { (ripRefs.current[m.id] ||= [])[k] = el; }}/>)}
         {[0, 1].map(k => <circle key={'spk' + k} className="jelly-spark" r="2.2" ref={el => { (sparkRefs.current[m.id] ||= [])[k] = el; }}/>)}
       </g>)}
       <g className="grav" ref={gravRef} aria-hidden="true">
@@ -773,10 +807,13 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
     </svg>
     {MODULES.map(m => {
       const sum = summaries[m.id], active = live.current.mod === m.id;
+      // 静态兜底（与 fan-item 同款）：rAF 冻结（WebView2 失焦/被遮挡）时水母也按最终布局可见，
+      // 不再叠死在左上角——10-15 壁纸端"点进模块水母消失"的根因修复
+      const j0 = t0.jelly[m.id] || {x: 100, y: 100, s: 92, o: 1};
       return <React.Fragment key={m.id}>
         <button className={`jelly ${active ? 'active' : ''}`} ref={el => { jellyRefs.current[m.id] = el; }} onClick={() => onModule(m.id)}
           onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }}
-          style={{'--mod': MOD_STYLE[m.id].color}}
+          style={{'--mod': MOD_STYLE[m.id].color, transform: `translate3d(${j0.x - j0.s / 2}px,${j0.y - j0.s * .375}px,0) scale(${j0.s / 200})`, opacity: j0.o}}
           aria-label={`${m.title} ${m.en}，${sum.count} 条`}>
           <div className="jelly-inner" ref={el => { innerRefs.current[m.id] = el; }} style={{filter: MOD_STYLE[m.id].filter}}>
             <video className="vsrc" ref={vidRef(m.id, 'video')} src={T.media.jelly} poster={T.media.jellyPoster} muted loop playsInline autoPlay preload="auto"
@@ -785,7 +822,8 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           </div>
         </button>
         <button className={`jelly-label ${active ? 'active' : ''} ${hub || live.current.size.w >= 760 ? 'below' : 'side'}`} ref={el => { labelRefs.current[m.id] = el; }} onClick={() => onModule(m.id)} tabIndex={-1}
-          onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }} style={{'--mod': MOD_STYLE[m.id].color}}>
+          onPointerEnter={() => { live.current.hover = m.kind; }} onPointerLeave={() => { live.current.hover = null; }}
+          style={{'--mod': MOD_STYLE[m.id].color, transform: `translate3d(${j0.x - 66}px,${j0.y + j0.s * .36}px,0)`, opacity: j0.o}}>
           <span className="jl-icon"><Icon name={m.icon} size={14}/></span>
           <span className="jl-count">{sum.count}</span>
           <span className="jl-name">{m.title}<em>{m.en}</em></span>
@@ -821,7 +859,9 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           <span className="fi-meta">{meta.map(([k, en, v, cls], j) => <span key={j} className={cls || (k === '↔' ? 'mutual' : '')}>{k}{en && <em>{en}</em>} {v !== '' && <b>{v}</b>}</span>)}</span>
         </span>
         {n.kind === 'task' && bd ? <TaskStatusFan badge={bd} task={n.task} onAction={onAction}/>
-          : bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}
+          : <>{n.service?.url && <span className="fi-link" role="link" tabIndex={-1} title={n.service.url}
+              onClick={e => { e.stopPropagation(); window.open(n.service.url, '_blank'); }}>打开 ↗</span>}
+            {bd && <span className="fi-badge" style={{'--b': bd.color}}>{bd.text}</span>}</>}
       </button>;
     })}
   </div>;
@@ -908,13 +948,9 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
       ];
     }
     if (mod === 'services') {
-      // 服务舱两级链：服务舱 → 分类（核心服务/常驻工作者），计数=服务本体（含离线）
+      // 服务舱单级链（平铺后无分类层）
       const S = graph.nodes.filter(x => x.kind === 'service');
-      const grp = zone === '核心服务' ? 'core' : 'worker';
-      return [
-        {name: '服务舱', zone: null, n: S.length},
-        {name: zone, zone, n: S.filter(x => x.service?.group === grp).length}
-      ];
+      return [{name: '服务舱', zone: null, n: S.length}];
     }
     const parts = zone.split('/');
     const zoneNotes = graph.nodes.filter(x => x.kind === 'note' && x.folder === 'f:kb:' + parts[0]);

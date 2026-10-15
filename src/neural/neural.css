@@ -97,7 +97,8 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .zone-node:hover { border-color: rgba(159, 242, 204, .65); }
 .zone-node.cur { border-color: rgba(159, 242, 204, .7); color: #dff7ea; background: rgba(14, 24, 18, .72); }
 .zone-node.cur .zn-dot { box-shadow: 0 0 15px rgba(159, 242, 204, .95); }
-.jelly { position: absolute; z-index: 1; left: 0; top: 0; width: 200px; height: 150px; padding: 0; border: 0; background: none; transform-origin: 0 0; mix-blend-mode: screen; will-change: transform, opacity; transition: filter .3s; filter: brightness(calc(1 + var(--fl, 0) * .38)); }
+.jelly { position: absolute; z-index: 20; left: 0; top: 0; width: 200px; height: 150px; padding: 0; border: 0; background: none; transform-origin: 0 0; mix-blend-mode: screen; will-change: transform, opacity; transition: filter .3s; filter: brightness(calc(1 + var(--fl, 0) * .38)); }
+/* 水母在页面内容最上层（用户令 10-15 二轮）：盖过搜索框/图例/面包屑/详情栏，只低于顶栏与弹窗层 */
 /* 发光体的"阴影"逻辑：发光水母不投影，底部是照亮下方水域的自身色光晕（用体积感替代黑影的锚定感） */
 .jelly::before { content: ''; position: absolute; inset: 4% -6% -26%; pointer-events: none; border-radius: 50%;
   background: radial-gradient(ellipse 64% 36% at 50% 82%, color-mix(in srgb, var(--mod, #9ad) 17%, transparent), transparent 72%);
@@ -109,7 +110,7 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 /* 标签始终压在所有水母的点击区之上，避免游动时被别的水母挡住 */
 /* 文字随模块色：白色字在白亮光晕附近看不清；模块色+深色衬底影保对比。
    选择器带 .neural 上下文提过 .neural button 的 color:inherit reset（R21 同族坑） */
-.neural .jelly-label { position: absolute; z-index: 2; left: 0; top: 0; display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon count" "name name" "sub sub"; align-items: center; column-gap: 8px; min-width: 132px; padding: 9px 6px 10px; border-radius: 12px; border: 0; background: none; backdrop-filter: none; color: var(--mod); text-align: left; will-change: transform, opacity; text-shadow: 0 1px 6px rgba(0, 0, 0, .55), 0 0 14px color-mix(in srgb, var(--mod, #fff) 16%, transparent); transition: filter .3s; }
+.neural .jelly-label { position: absolute; z-index: 20; left: 0; top: 0; display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon count" "name name" "sub sub"; align-items: center; column-gap: 8px; min-width: 132px; padding: 9px 6px 10px; border-radius: 12px; border: 0; background: none; backdrop-filter: none; color: var(--mod); text-align: left; will-change: transform, opacity; text-shadow: 0 1px 6px rgba(0, 0, 0, .55), 0 0 14px color-mix(in srgb, var(--mod, #fff) 16%, transparent); transition: filter .3s; }
 .jelly-label.below { justify-items: start; }
 .jelly-label:hover { filter: drop-shadow(0 0 12px color-mix(in srgb, var(--mod) 38%, transparent)); }
 .jelly-label.active { text-shadow: 0 1px 8px rgba(0, 0, 0, .9), 0 0 26px color-mix(in srgb, var(--mod) 55%, transparent); filter: drop-shadow(0 0 14px color-mix(in srgb, var(--mod) 30%, transparent)); }
@@ -126,6 +127,9 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .fi-meta em { margin-left: 2px; font-size: 1em; }
 .fi-meta b { color: var(--text); font-weight: 500; }
 .fi-meta .mutual { background: rgba(230, 207, 152, .14); color: #e6cf98; }
+/* 服务卡可打开链接（用户令 10-15）：有确定地址的服务（工作站/老面板）卡上一键新窗打开 */
+.fi-link { flex: none; margin-left: 2px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(159, 242, 204, .35); background: rgba(14, 24, 18, .55); color: #9ff2cc; font-size: 10.5px; line-height: 1.5; cursor: pointer; transition: border-color .2s, box-shadow .2s, color .2s; }
+.fi-link:hover { border-color: rgba(159, 242, 204, .8); box-shadow: 0 0 10px rgba(159, 242, 204, .25); color: #dff7ea; }
 /* 截止日 chip：超期=警报红 / 临期≤3天=高亮金（金=全图"新/高亮"语言）/ 其余中性 */
 .fi-meta .due-over { background: rgba(255, 115, 133, .13); color: #ff7385; }
 .fi-meta .due-over b { color: #ff98a5; }
@@ -198,14 +202,14 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .hub-meta { margin: 18px 0 0; font-size: 12px; color: var(--text-2); }
 .hub-hint { margin: 6px 0 0; font-size: 11.5px; color: #e6cf98; opacity: .85; }
 @keyframes introFade { from { opacity: 0; transform: translateY(12px); } }
-.crumbs { position: absolute; left: 28px; top: 82px; display: flex; align-items: center; gap: 8px; padding: 5px 14px 5px 5px; border-radius: 999px; background: rgba(20, 21, 21, .72); border: 1px solid var(--line); backdrop-filter: blur(10px); font-size: 12.5px; animation: introFade .5s both; z-index: 5; }
+.crumbs { position: absolute; left: 28px; top: 82px; display: flex; align-items: center; gap: 8px; padding: 5px 14px 5px 5px; border-radius: 999px; background: rgba(20, 21, 21, .72); border: 1px solid var(--line); backdrop-filter: blur(10px); font-size: 12.5px; animation: introFade .5s both; z-index: 8; }
 .crumbs button { border: 0; background: none; color: var(--text-2); padding: 0; }
 .crumbs button:hover { color: var(--text); }
 .crumbs .crumb-back { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, .06); color: var(--text); }
 .crumbs > span { color: var(--muted); }
 .crumbs b { font-weight: 500; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 层级卡链：钻入知识库后旧层缩小保留在清单上方，完整层名+篇数，点击回退 */
-.zone-trail { position: absolute; top: 84px; right: calc(clamp(30vw, 360px, 440px) + 72px); display: flex; align-items: center; gap: 6px; z-index: 5; animation: introFade .4s both; }
+.zone-trail { position: absolute; top: 84px; right: calc(clamp(30vw, 360px, 440px) + 72px); display: flex; align-items: center; gap: 6px; z-index: 8; animation: introFade .4s both; }
 .zt-card { display: flex; align-items: baseline; gap: 7px; padding: 5px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: rgba(20, 21, 21, .72); backdrop-filter: blur(10px); color: var(--text-2); font-size: 12px; transform: scale(.84); transform-origin: right center; opacity: .78; transition: all .25s; cursor: pointer; }
 .zt-card b { font-weight: 500; color: var(--text); }
 .zt-card em { font-style: normal; font-size: 10.5px; color: var(--muted); }
@@ -213,9 +217,9 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .zt-card.cur { transform: scale(1); opacity: 1; border-color: rgba(159, 242, 204, .4); color: #dff7ea; }
 .zt-card.cur b { color: #9ff2cc; }
 .zt-arrow { color: var(--muted); font-size: 13px; }
-.pan-hint { position: absolute; right: calc(clamp(33vw, 380px, 470px) + 72px); bottom: 64px; font-size: 11px; color: var(--muted); background: rgba(20, 21, 21, .6); padding: 4px 10px; border-radius: 8px; z-index: 5; pointer-events: none; animation: introFade .6s .8s both; }
+.pan-hint { position: absolute; right: calc(clamp(33vw, 380px, 470px) + 72px); bottom: 64px; font-size: 11px; color: var(--muted); background: rgba(20, 21, 21, .6); padding: 4px 10px; border-radius: 8px; z-index: 8; pointer-events: none; animation: introFade .6s .8s both; }
 .pan-hint em { font-style: normal; color: var(--text-2); }
-.stage-tools { position: absolute; right: 28px; top: 80px; display: flex; gap: 2px; padding: 4px; border-radius: 999px; z-index: 5; }
+.stage-tools { position: absolute; right: 28px; top: 80px; display: flex; gap: 2px; padding: 4px; border-radius: 999px; z-index: 8; }
 .stage-tools button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--text-2); padding: 6px 12px; border-radius: 999px; font-size: 12px; }
 .stage-tools button:hover, .stage-tools button[aria-pressed="true"] { color: var(--text); background: rgba(255, 255, 255, .07); }
 .stage-note .stage-tools { display: none; }
@@ -233,7 +237,7 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .module-hint { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); margin: 0; font-size: 12px; color: var(--text-2); padding: 7px 16px; border-radius: 999px; border: 1px solid var(--line); background: rgba(20, 21, 21, .72); animation: introFade .6s .5s both; }
 
 /* —— 对话坞 —— */
-.dock { position: absolute; left: 50%; bottom: 22px; width: min(600px, calc(100vw - 32px)); transform: translateX(-50%); display: grid; gap: 10px; animation: dockIn 1s 2s both; z-index: 6; }
+.dock { position: absolute; left: 50%; bottom: 22px; width: min(600px, calc(100vw - 32px)); transform: translateX(-50%); display: grid; gap: 10px; animation: dockIn 1s 2s both; z-index: 8; }
 @keyframes dockIn { from { opacity: 0; transform: translate(-50%, 18px); } }
 .intro-done .dock, .intro-done .legend, .intro-done .hub-copy { animation-delay: 0s; animation-duration: .5s; }
 .dock-panel { padding: 10px 12px 10px; border-radius: 18px; border-color: rgba(236, 236, 232, .2); box-shadow: 0 0 0 1px rgba(236, 236, 232, .05), 0 0 40px rgba(236, 236, 232, .06), 0 24px 60px rgba(0, 0, 0, .45); }

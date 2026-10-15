@@ -51,8 +51,8 @@ export async function fetchEcosystem() {
     alive('/kb/healthz')   // kbserve 根路由是 404，健康探测必须打 /healthz（实测 200），否则在线服务被误报离线
   ]);
   const services = [
-    {id: 'hub', name: '工作站 8331', ok: hubOK, group: 'core', desc: '任务/拍板/实体投影（本图主数据源）'},
-    {id: 'panel', name: '老面板 8330', ok: panelOK, group: 'core', desc: '现役写接口所在'},
+    {id: 'hub', name: '工作站 8331', ok: hubOK, group: 'core', desc: '任务/拍板/实体投影（本图主数据源）', url: 'http://127.0.0.1:8331/'},
+    {id: 'panel', name: '老面板 8330', ok: panelOK, group: 'core', desc: '现役写接口所在', url: 'http://127.0.0.1:8330/'},
     {id: 'kbserve', name: '检索服务 8342', ok: kbOK, group: 'core', desc: 'KB 语义+关键词混合检索'},
     ...(data.workers || []).filter(w => !w.retired && w.type === 'resident')
       .map(w => ({id: w.id, name: `${w.emoji || '🔧'} ${w.name}`, ok: w.hb_state === 'ok', group: 'worker', desc: w.desc || '', state: w.hb_state}))

@@ -101,6 +101,7 @@ function App() {
   const reduced = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
 
   const ecoSigRef = useRef('');
+  const pullRef = useRef(null);
   useEffect(() => {
     let stop = false;
     const pull = async () => {
@@ -148,7 +149,7 @@ function App() {
         : '累计完成/所有';
     }
     else if (mod === 'services')
-      z = n.service?.group === 'worker' ? '常驻工作者' : '核心服务';
+      z = null;   // 服务舱已平铺（10-15），无分类层
     if (mod) setFocus({mod, zone: z, sel: id});
   };
   const onAction = useCallback(a => {
