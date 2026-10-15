@@ -2,16 +2,17 @@
 import {asset} from '../config';
 
 export const T = {
-  kinds: {core: '#ecd9a6', folder: '#d9b6c1', post: '#c0b8ef', note: '#8fe0c0', idea: '#e8c48c', draft: '#a9d3e4', concept: '#e4e6e8', tag: '#98a6a1', ghost: '#70746f', task: '#b9b0f5', decision: '#f0c27a', memory: '#9cc8ee', service: '#ecb8de'},
+  kinds: {core: '#ecd9a6', folder: '#d9b6c1', post: '#c0b8ef', note: '#8fe0c0', idea: '#e8c48c', draft: '#a9d3e4', concept: '#e4e6e8', tag: '#98a6a1', ghost: '#70746f', task: '#b9b0f5', decision: '#f0c27a', memory: '#9cc8ee', service: '#e4e6e8'},
   modules: {
     // R71 样式回原版（用户令 10-15）：水母滤镜回上游 v0.2.0-original 的淡雅五色（饱和度 1.x，批A/R28 的 2.2~2.6 撤销）；
     // 按色调对应原版五值：tasks←works紫 / kb←methods绿 / decisions←ideas金 / memory←drafts蓝 / services←concepts银灰；
-    // color 字段保留现版（连线/触须/标签的模块色不变，与水母视频色不再强绑定）
+    // R73（用户令"粉红这个改成淡白"）：services 的 color 回上游 concepts 银白 #e2e5e8——五只里只有它粉线与银灰身体
+    // 不一致；kinds.service 同步回 #e4e6e8（卡点与线同族）
     tasks: {color: '#b9b0f5', filter: 'hue-rotate(215deg) saturate(1.1)'},
     kb: {color: '#8fe0c0', filter: 'hue-rotate(118deg) saturate(1)'},
     decisions: {color: '#f0c27a', filter: 'saturate(1)'},
     memory: {color: '#9cc8ee', filter: 'hue-rotate(158deg) saturate(1.05)'},
-    services: {color: '#ecb8de', filter: 'hue-rotate(185deg) saturate(.3) brightness(1.15)'}
+    services: {color: '#e2e5e8', filter: 'hue-rotate(185deg) saturate(.3) brightness(1.15)'}
   },
   // palindrome 剪辑（正放+倒放拼接）：循环回到首帧时画面连续，消除播完一帧的跳变；原片保留作回退
   media: {orb: asset('media/orb_pal.mp4'), orbPoster: asset('media/orb.jpg'), jelly: asset('media/jellyfish_pal.mp4'), jellyPoster: asset('media/jellyfish.jpg')},

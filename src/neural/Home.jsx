@@ -494,7 +494,10 @@ const DUST = Array.from({length: 110}, (_, i) => ({a: i * 2.39996, v: .035 + (i 
 const posterCache = new Map();
 const posterOf = url => { if (!posterCache.has(url)) { const img = new Image(); img.src = url; posterCache.set(url, img); } return posterCache.get(url); };
 // R71 样式回原版（用户令 10-15）：paintVideo 退回上游原样直绘——R69 的触手染色/延伸带/伞缘加深整段撤销
-function paintVideo(pair) {
+// R73（用户令"触手要根据动画持续动"）：加 sway 参数——素材本身"开头摆、中段静"，触手区横向分片
+// 正弦微摆（越靠下摆幅越大=鞭梢），每只独立相位，随时间永续。只平移像素、不染色不拉伸=原版直出观感不变
+const tentBuf = document.createElement('canvas');
+function paintVideo(pair, sway) {
   const {video, canvas} = pair;
   if (!video || !canvas) return;
   const cw = canvas.clientWidth, ch = canvas.clientHeight;
@@ -507,13 +510,28 @@ function paintVideo(pair) {
   const sw0 = ready ? video.videoWidth : src.naturalWidth, sh0 = ready ? video.videoHeight : src.naturalHeight;
   if (!sw0 || !sh0) return;
   const stamp = ready ? video.currentTime : -1;
-  if (!resized && stamp === pair.stamp && ready === pair.ready) return;
+  if (!resized && stamp === pair.stamp && ready === pair.ready && !sway) return;
   pair.stamp = stamp; pair.ready = ready;
   // 等同 object-fit: cover
   const k = Math.max(W / sw0, H / sh0), sw = W / k, sh = H / k;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, W, H);
   ctx.drawImage(src, (sw0 - sw) / 2, (sh0 - sh) / 2, sw, sh, 0, 0, W, H);
+  if (!sway) return;
+  const bandY0 = Math.round(H * .58), bandH = H - bandY0;
+  if (bandH <= 4) return;
+  tentBuf.width = W; tentBuf.height = bandH;
+  const bctx = tentBuf.getContext('2d');
+  bctx.clearRect(0, 0, W, bandH);
+  bctx.drawImage(canvas, 0, bandY0, W, bandH, 0, 0, W, bandH);
+  ctx.clearRect(0, bandY0, W, bandH);
+  const slices = 4, pad = 10 * dpr;   // 每片外扩 pad 保证平移后无缝覆盖
+  for (let s = 0; s < slices; s++) {
+    const sh2 = bandH / slices + 1, sy = s / slices * bandH;
+    const amp = (1.1 + s * 1.05) * dpr;   // 顶部约 1px → 梢部约 4px（css 像素）
+    const off = sway.reduced ? 0 : Math.sin(sway.t * 1.05 + s * 1.25 + sway.seed) * amp;
+    ctx.drawImage(tentBuf, 0, sy, W, sh2, off - pad, bandY0 + s / slices * bandH, W + pad * 2, sh2);
+  }
 }
 
 const bez = (p0, p1, p2, p3, u) => { const m = 1 - u; return m * m * m * p0 + 3 * m * m * u * p1 + 3 * m * u * u * p2 + u * u * u * p3; };
@@ -714,7 +732,8 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           const active = m.id === L.mod || m.kind === L.hover;
           g.glow.setAttribute('d', d); g.core.setAttribute('d', d);
           const vis = clamp(o, 0, 1) * (L.stage === 'hub' ? 1 : active ? 1 : .45);
-          g.glow.style.opacity = vis * (active ? .9 : .45); g.core.style.opacity = vis;
+          // R73（用户令"线条整体颜色再淡一点"）：粗晕与芯线整体降一档
+          g.glow.style.opacity = vis * (active ? .55 : .26); g.core.style.opacity = vis * .82;
           const pulses = pulseRefs.current[m.id] || [];
           pulses.forEach((c, k) => {
             if (!c) return;
@@ -779,7 +798,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
             const ey = y + 15 * sc, mx = (src.x + x) / 2;
             const csw = L.reduced ? 0 : Math.sin(t * .7 + i * .9 + k * 1.3) * 5;   // 链线同款慢漂浮（端点钉死、只摆中段）
             p.setAttribute('d', `M${src.x},${src.y} C${mx},${src.y + csw} ${mx},${ey - csw} ${x + 2},${ey}`);   // 终点插入卡内 2px，接住卡首圆点
-            p.style.opacity = clamp(Math.min(o, src.o), 0, 1) * (tp.path ? .85 : .4);
+            p.style.opacity = clamp(Math.min(o, src.o), 0, 1) * (tp.path ? .55 : .3);   // R73 链线 .85/.4→.55/.3（线条整体调淡）
             // 链线上的流动脉冲（与扇形触须同款）：水母→分类→内容 逐级接力，链路"活"起来
             const pc = aThreadPulseRefs.current[k]?.[i];
             if (pc) {
@@ -817,7 +836,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
             const c1x = ox2 + dx * .5 + (L.reduced ? 0 : Math.sin(t * .6 + i) * 6), c1y = oy2 + sway, c2x = x - dx * .45, c2y = y - sway * .5;
             p.setAttribute('d', `M${ox2},${oy2} C${c1x},${c1y} ${c2x},${c2y} ${x + 2},${y}`);   // 终点插入卡内，接住卡首圆点
             const on = sel === n.id;
-            p.style.opacity = clamp(o, 0, 1) * (sel ? (on ? 1 : .35) : .8);
+            p.style.opacity = clamp(o, 0, 1) * (sel ? (on ? 1 : .35) : .55);   // R73 未选中触须 .8→.55（线条整体调淡）
             p.style.strokeWidth = on ? 1.8 : 1;
             (fanPulseRefs.current[i] || []).forEach((c, k) => {
               if (!c) return;
@@ -833,10 +852,16 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       for (const [id, st] of vis) if (!touched.has(id)) st.role = 'off';
       // 光球与水母的视频画面；水母视频播放速度随呼吸相位调制（触手律动，用户令十三轮），
       // 第二形态（module/note）半速安静
+      // R73 视频自愈（用户令"动画要保持流畅"）：壁纸 WebView2 常年被系统判 hidden 会把视频暂停
+      // 且恢复事件不可靠——动画循环里 4s 巡检一次，非主动暂停就拉起
+      if (t - (L.vidChk || 0) > 4) {
+        L.vidChk = t;
+        if (!L.paused && !L.reduced) Object.values(vids.current).forEach(p => { if (p.video && p.video.paused) p.video.play().catch(() => {}); });
+      }
       for (const [vid, pair] of Object.entries(vids.current)) {
         if (pair.video) pair.video.playbackRate = vid === 'orb' ? 1
           : (L.stage === 'hub' ? 1 + .13 * (S.jelly[vid]?.breathe || 0) : .5);
-        paintVideo(pair);
+        paintVideo(pair, vid === 'orb' ? null : {t, seed: vid.charCodeAt(0) % 7 + vid.length * 2.7, reduced: L.reduced});
       }
     };
     // 每帧先排好下一帧再执行：某一帧出错也不会让光球和水母停住
@@ -847,8 +872,10 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   }, [items, live, sel]);
 
   // 暂停时一并暂停视频
+  // R73（用户令"动画要一直流畅"）：撤掉 document.hidden 暂停条件——壁纸 WebView2 常年处于
+  // 后台/隐藏态，这条规则在壁纸场景=视频开局即冻且恢复不可靠；意外暂停由动画循环 4s 自愈兜底
   useEffect(() => {
-    const sync = () => document.querySelectorAll('.scene video').forEach(v => { if (live.current.paused || live.current.reduced || document.hidden) v.pause(); else v.play().catch(() => {}); });
+    const sync = () => document.querySelectorAll('.scene video').forEach(v => { if (live.current.paused || live.current.reduced) v.pause(); else v.play().catch(() => {}); });
     live.current.syncVideo = sync; sync();
     document.addEventListener('visibilitychange', sync);
     return () => document.removeEventListener('visibilitychange', sync);
