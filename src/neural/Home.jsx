@@ -493,7 +493,10 @@ const DUST = Array.from({length: 110}, (_, i) => ({a: i * 2.39996, v: .035 + (i 
 // 画布在所有浏览器里都能显示。视频本身透明地留在原位负责播放；未加载好时先画封面图。
 const posterCache = new Map();
 const posterOf = url => { if (!posterCache.has(url)) { const img = new Image(); img.src = url; posterCache.set(url, img); } return posterCache.get(url); };
-function paintVideo(pair) {
+// R69 触手延伸共用缓冲 + 模块色解析（hex→rgb；异常格式兜底冷蓝灰）
+const tentBuf = document.createElement('canvas');
+const hex2rgb = h => { const m = /#?([0-9a-f]{6}|[0-9a-f]{3})/i.exec(String(h || '')); if (!m) return [170, 185, 220]; const v = m[1].length === 3 ? m[1].split('').map(c => c + c).join('') : m[1]; const n = parseInt(v, 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+function paintVideo(pair, fx) {
   const {video, canvas} = pair;
   if (!video || !canvas) return;
   const cw = canvas.clientWidth, ch = canvas.clientHeight;
@@ -512,7 +515,50 @@ function paintVideo(pair) {
   const k = Math.max(W / sw0, H / sh0), sw = W / k, sh = H / k;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, W, H);
-  ctx.drawImage(src, (sw0 - sw) / 2, (sh0 - sh) / 2, sw, sh, 0, 0, W, H);
+  // R69（用户令：在视频本体上调，不外挂几何线）：水母本体画进 84% 高（底部源裁 16% 留给触手延伸带），
+  // 比例不变只裁不压；光球 fx=null 全保持原样
+  const MAIN = fx ? .84 : 1;
+  ctx.drawImage(src, (sw0 - sw) / 2, (sh0 - sh) / 2, sw, sh * MAIN, 0, 0, W, Math.round(H * MAIN));
+  if (!fx) return;
+  const cs = a => `rgba(${fx.rgb[0]},${fx.rgb[1]},${fx.rgb[2]},${a})`;
+  // ① 头部轮廓加深：multiply 径向环——亮伞缘像素 × 模块色 = 深色轮廓；黑背景乘不变（screen 混合下不显）
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  const cx0 = W / 2, cy0 = H * .38;
+  const rg = ctx.createRadialGradient(cx0, cy0, W * .26, cx0, cy0, W * .52);
+  rg.addColorStop(0, 'rgba(0,0,0,0)');
+  rg.addColorStop(.6, 'rgba(0,0,0,0)');
+  rg.addColorStop(.85, cs(.9));
+  rg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = rg; ctx.fillRect(0, 0, W, Math.round(H * MAIN));
+  // ② 原触手上模块色：multiply 线性渐变（伞体以下）——触手亮像素染深模块色，黑底不变
+  const by0 = H * .46;
+  const lg = ctx.createLinearGradient(0, by0, 0, H * MAIN);
+  lg.addColorStop(0, 'rgba(0,0,0,0)');
+  lg.addColorStop(.4, cs(.85));
+  lg.addColorStop(1, cs(.85));
+  ctx.fillStyle = lg; ctx.fillRect(0, by0, W, H * MAIN - by0);
+  ctx.restore();
+  // ③ 触手加长：本体触手带拷贝 → 竖向拉伸 + 底部渐隐 + 分片微摆（越靠下摆幅越大=鞭梢，自然漂浮）
+  const bandY0 = H * .60, bandH = H * MAIN - bandY0;
+  tentBuf.width = W; tentBuf.height = Math.round(H * .40);
+  const bctx = tentBuf.getContext('2d');
+  bctx.clearRect(0, 0, tentBuf.width, tentBuf.height);
+  bctx.drawImage(canvas, 0, bandY0, W, bandH, 0, 0, W, tentBuf.height);
+  bctx.globalCompositeOperation = 'destination-in';
+  const fgd = bctx.createLinearGradient(0, 0, 0, tentBuf.height);
+  fgd.addColorStop(0, 'rgba(0,0,0,.95)');
+  fgd.addColorStop(.6, 'rgba(0,0,0,.45)');
+  fgd.addColorStop(1, 'rgba(0,0,0,0)');
+  bctx.fillStyle = fgd; bctx.fillRect(0, 0, W, tentBuf.height);
+  bctx.globalCompositeOperation = 'source-over';
+  const extY0 = H * MAIN - H * .06, extH = H - extY0, slices = 4;
+  for (let s = 0; s < slices; s++) {
+    const sy = s / slices * tentBuf.height, sh2 = tentBuf.height / slices + 1;
+    const dy = extY0 + s / slices * extH, dh = extH / slices + 1;
+    const sway = fx.reduced ? 0 : Math.sin(fx.t * .9 + s * 1.15 + fx.seed) * (1.2 + s * 1.5) * dpr;
+    ctx.drawImage(tentBuf, 0, sy, W, sh2, sway, dy, W, dh);
+  }
 }
 
 const bez = (p0, p1, p2, p3, u) => { const m = 1 - u; return m * m * m * p0 + 3 * m * m * u * p1 + 3 * m * u * u * p2 + u * u * u * p3; };
@@ -521,7 +567,6 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   const dustRef = useRef(null);
   const orbRef = useRef(null), jellyRefs = useRef({}), innerRefs = useRef({}), labelRefs = useRef({}), threadRefs = useRef({}), pulseRefs = useRef({}), sceneRef = useRef(null);
   const ripRefs = useRef({}), sparkRefs = useRef({}), gravRef = useRef(null);   // 引力可见化：水波纹/吸入光丝/光标视界环
-  const tentRefs = useRef({}), rimRefs = useRef({}), rimGlowRefs = useRef({});   // 程序化触手链+伞缘轮廓弧（批A⑥⑦）
   const itemRefs = useRef([]), fanRefs = useRef([]), fanPulseRefs = useRef([]);
   const aItemRefs = useRef([]), aThreadRefs = useRef([]), aThreadPulseRefs = useRef([]);
   const vids = useRef({});
@@ -629,55 +674,6 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         if (el) el.style.setProperty('--pose', rot.toFixed(1) + 'deg');   // 光幕跟转：底部色光晕随姿态旋转，始终照亮身体后方水域
         if (inner) inner.style.transform = `rotate(${rot}deg) scaleX(${MOD_STYLE[m.id].flip}) scaleY(${(L.stage === 'hub' ? 1 : .92) * (1 + .045 * breathe)})`;
         j.breathe = breathe;
-        // —— 程序化触手+伞缘轮廓（批A⑥⑦）——
-        // 触手=伞底缘 5 条 verlet 物理链：锚点随姿态旋转到伞底，节点惯性拖尾+微重力+慢速漂摆——
-        // 拖动/游动时触手自然后甩漂浮（视频自带触手是贴身刚性动画，长触手的漂浮感只能程序补）；
-        // 伞缘弧=细线勾头部轮廓+宽淡衬光（随姿态同步旋转）
-        {
-          const ca = Math.cos(rot * Math.PI / 180), sa = Math.sin(rot * Math.PI / 180);
-          const TS = j.tents || (j.tents = Array.from({length: 5}, () =>
-            Array.from({length: 10}, () => ({x, y, px: x, py: y}))));
-          const segLen = Math.max(4, s * .105);
-          const tp2 = tentRefs.current[m.id] || [];
-          for (let k = 0; k < TS.length; k++) {
-            const chain = TS[k];
-            const lx = (k / 4 - .5) * s * .5, ly = s * .08;
-            chain[0].x = x + lx * ca - ly * sa; chain[0].y = y + lx * sa + ly * ca;
-            chain[0].px = chain[0].x; chain[0].py = chain[0].y;
-            for (let n = 1; n < chain.length; n++) {
-              const nd = chain[n];
-              const nvx = (nd.x - nd.px) * .88, nvy = (nd.y - nd.py) * .88;
-              nd.px = nd.x; nd.py = nd.y;
-              nd.x += nvx + (!L.reduced ? Math.sin(t * .8 + k * 1.4 + n * .55) * .22 : 0);
-              nd.y += nvy + s * .0022;
-            }
-            for (let it = 0; it < 2; it++) for (let n = 1; n < chain.length; n++) {
-              const a2 = chain[n - 1], b2 = chain[n];
-              let ddx = b2.x - a2.x, ddy = b2.y - a2.y;
-              const dd = Math.hypot(ddx, ddy) || .001, diff = (dd - segLen) / dd;
-              if (n === 1) { b2.x -= ddx * diff; b2.y -= ddy * diff; }
-              else { a2.x += ddx * diff * .5; a2.y += ddy * diff * .5; b2.x -= ddx * diff * .5; b2.y -= ddy * diff * .5; }
-            }
-            const el = tp2[k];
-            if (el) {
-              let dd2 = '';
-              for (let n = 0; n < chain.length; n++) dd2 += (n ? 'L' : 'M') + chain[n].x.toFixed(1) + ',' + chain[n].y.toFixed(1);
-              el.setAttribute('d', dd2);
-              el.style.opacity = (clamp(o, 0, 1) * .5).toFixed(3);
-            }
-          }
-          const rp = rimRefs.current[m.id], rgp = rimGlowRefs.current[m.id];
-          if (rp) {
-            let dd3 = '';
-            for (let k = 0; k <= 20; k++) {
-              const aa = Math.PI + k / 20 * Math.PI;   // 上半弧：左缘→顶→右缘
-              const lx2 = Math.cos(aa) * s * .44, ly2 = -s * .045 + Math.sin(aa) * s * .30;
-              dd3 += (k ? 'L' : 'M') + (x + lx2 * ca - ly2 * sa).toFixed(1) + ',' + (y + lx2 * sa + ly2 * ca).toFixed(1);
-            }
-            rp.setAttribute('d', dd3); rp.style.opacity = (clamp(o, 0, 1) * .55).toFixed(3);
-            if (rgp) { rgp.setAttribute('d', dd3); rgp.style.opacity = (clamp(o, 0, 1) * .14).toFixed(3); }
-          }
-        }
         if (lab) {
           const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
           const hub = L.stage === 'hub', narrow = L.size.w < 760;
@@ -885,7 +881,8 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       for (const [vid, pair] of Object.entries(vids.current)) {
         if (pair.video) pair.video.playbackRate = vid === 'orb' ? 1
           : (L.stage === 'hub' ? 1 + .13 * (S.jelly[vid]?.breathe || 0) : .5);
-        paintVideo(pair);
+        const mi = MODULES.findIndex(mm => mm.id === vid);   // R69：水母传画布加工参数（触手染色延伸+伞缘加深），光球不传
+        paintVideo(pair, mi >= 0 ? {rgb: hex2rgb(MOD_STYLE[vid]?.color), t, seed: mi * 1.7, reduced: L.reduced} : null);
       }
     };
     // 每帧先排好下一帧再执行：某一帧出错也不会让光球和水母停住
@@ -961,9 +958,6 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           <radialGradient id="pulse-in"><stop offset="0" stopColor={T.pulse.in[0]}/><stop offset=".4" stopColor={T.pulse.in[1]}/><stop offset="1" stopColor={T.pulse.in[1]} stopOpacity="0"/></radialGradient>
         </defs>
         {MODULES.map(m => <g key={m.id} style={{color: MOD_STYLE[m.id].color}}>
-          {[0, 1, 2, 3, 4].map(k => <path key={'tnt' + k} className="jelly-tent" ref={el => { (tentRefs.current[m.id] ||= [])[k] = el; }}/>)}
-          <path className="jelly-rim-glow" ref={el => { rimGlowRefs.current[m.id] = el; }}/>
-          <path className="jelly-rim" ref={el => { rimRefs.current[m.id] = el; }}/>
           <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], glow: el}; }} className="thread-glow" filter="url(#thread-blur)"/>
           <path ref={el => { threadRefs.current[m.id] = {...threadRefs.current[m.id], core: el}; }} className="thread-core"/>
           {[0, 1, 2].map(k => <circle key={k} r={k === 2 ? 4.5 : 5.5} fill={`url(#${k === 2 ? 'pulse-in' : 'pulse-out'})`} ref={el => { (pulseRefs.current[m.id] ||= [])[k] = el; }}/>)}
