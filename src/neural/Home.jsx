@@ -253,9 +253,9 @@ export function targets(L, t) {
     const js = MODULES.map((m, i) => {
       const rm = RM[m.id] || (RM[m.id] = {x: 0, y: 0, vx: 4, vy: 0, ang: Math.random() * 6.28, spd: 6, turnAt: 0, targetAng: 0, targetSpd: 7});
       if (swim) {
-        if (t >= rm.turnAt) { rm.turnAt = t + 4.5 + Math.random() * 6.5; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 2.2 + Math.random() * 5; }   // 随机掉头（整体放缓：目标速度上限 13→7.2，转向间隔拉长）
+        if (t >= rm.turnAt) { rm.turnAt = t + 5 + Math.random() * 7; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 1.8 + Math.random() * 4; }   // 随机掉头（十三轮再放缓：速度上限 7.2→5.8，转向间隔更长）
         let da = rm.targetAng - rm.ang; da = Math.atan2(Math.sin(da), Math.cos(da));
-        rm.ang += clamp(da, -.75 * dt, .75 * dt);   // 受限角速度=转弯更柔（1.1→0.75）
+        rm.ang += clamp(da, -.55 * dt, .55 * dt);   // 受限角速度（0.75→0.55，转弯更柔）
         rm.spd += (rm.targetSpd - rm.spd) * Math.min(1, dt * .5);
         rm.vx += (Math.cos(rm.ang) * rm.spd - rm.vx) * Math.min(1, dt * .8);
         rm.vy += (Math.sin(rm.ang) * rm.spd * .4 - rm.vy) * Math.min(1, dt * .8);
@@ -374,24 +374,12 @@ export function targets(L, t) {
             rm.ay = rm.ay == null ? jj.y : rm.ay + (L.smy - rm.ay) * k;
             jj.x = rm.ax; jj.y = rm.ay + jj.s * .35;   // 头部吸在鼠标箭头上（头=中心上方 s*.35）
             jj.pull = 1; jj.s *= 1.08; jj.att = true;
-            // 硬约束：不出屏幕、不压别的神经走廊、不压光球——碰到即反弹脱钩回漫游
-            const PAD = 92;
-            let bn = null;
-            if (jj.x < PAD) bn = [1, 0]; else if (jj.x > W - PAD) bn = [-1, 0];
-            else if (jj.y < PAD - 10) bn = [0, 1]; else if (jj.y > H - PAD + 10) bn = [0, -1];
-            if (!bn) {
-              const ox2 = jj.x - ocx, oy2 = jj.y - ocy, od = Math.hypot(ox2, oy2), omin = res.orb.s * .38 + jj.s * .3;
-              if (od < omin && od > .01) bn = [ox2 / od, oy2 / od];
-            }
-            if (!bn) for (let k2 = 0; k2 < abs.length; k2++) {
-              if (k2 === i) continue;
-              const ex = abs[k2][0] - ocx, ey = abs[k2][1] - ocy, el2 = Math.hypot(ex, ey) || 1;
-              const ux = ex / el2, uy = ey / el2;
-              const proj = clamp((jj.x - ocx) * ux + (jj.y - ocy) * uy, 0, el2);
-              const ddx = jj.x - (ocx + ux * proj), ddy = jj.y - (ocy + uy * proj), dd2 = Math.hypot(ddx, ddy);
-              if (dd2 < jsz * .62 + 22 && dd2 > .01) { bn = [ddx / dd2, ddy / dd2]; break; }
-            }
-            if (bn) detach(bn[0], bn[1]);
+            // 拖动零碰撞（用户令十三轮：碰撞反弹影响手感、角落水母拉不出）：
+            // 被吸着时吸附优先级最高，不被走廊/光球/边界弹脱——屏幕边缘软限制（clamp 住不脱钩），
+            // 游弋时的碰撞秩序（成对/走廊/光球反弹）完整保留
+            const PAD = 60;
+            if (jj.x < PAD) jj.x = PAD; else if (jj.x > W - PAD) jj.x = W - PAD;
+            if (jj.y < PAD - 10) jj.y = PAD - 10; else if (jj.y > H - PAD + 10) jj.y = H - PAD + 10;
           }
         } else if (add < 150 && add > 2) { const u = 1 - add / 150; const f = Math.pow(u, 1.8) * 60; jj.x += adx / add * f; jj.y += ady / add * f; jj.s *= 1 - u * .2; jj.pull = u; }
       } else rm.att = false;
@@ -630,12 +618,16 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         else if (!tg.att) { const sp2 = Math.hypot(tg.vx || 0, tg.vy || 0); if (sp2 > 2.5) dirT = Math.atan2(tg.vy, tg.vx) * 180 / Math.PI + 90; }
         let yawT = dirT == null ? 0 : dirT;
         yawT = hyS.x + (((yawT - hyS.x) % 360) + 540) % 360 - 180;   // 归一到最短旋转路径
-        const hy = spring(hyS, yawT, dt, 12);
-        const swayBase = L.stage === 'hub' ? (tg.att ? 2.2 : 3.2) : 1;   // module=第二形态基本静定
-        const sway2 = !L.reduced ? swayBase * Math.sin(t * 1.35 + i * 1.3) : 0;
+        const hy = spring(hyS, yawT, dt, 6);   // 六轮弹簧刚度 12→6（用户令十三轮）：回正/转向更缓慢柔和丝滑
+        const swayBase = L.stage === 'hub' ? (tg.att ? 1.6 : 2.4) : .8;   // 摆频放缓 1.35→0.9，module=第二形态基本静定
+        const sway2 = !L.reduced ? swayBase * Math.sin(t * .9 + i * 1.3) : 0;
+        // 呼吸律动（用户令十三轮）：膨胀收缩随呼吸相位起伏，触手由视频播放速度同相位调制——
+        // 伞体鼓起时触手摆速也加快，像随光路脉动的水母
+        const breathe = !L.reduced ? Math.sin(t * 1.5 + i * 2.1) : 0;
         const rot = hy + sway2;
-        if (el) el.style.setProperty('--pose', rot.toFixed(1) + 'deg');   // 光幕跟转（用户令十二轮）：底部色光晕随姿态旋转，始终照亮身体后方水域
-        if (inner) inner.style.transform = `rotate(${rot}deg) scaleX(${MOD_STYLE[m.id].flip}) scaleY(${L.stage === 'hub' ? 1 : .92})`;
+        if (el) el.style.setProperty('--pose', rot.toFixed(1) + 'deg');   // 光幕跟转：底部色光晕随姿态旋转，始终照亮身体后方水域
+        if (inner) inner.style.transform = `rotate(${rot}deg) scaleX(${MOD_STYLE[m.id].flip}) scaleY(${(L.stage === 'hub' ? 1 : .92) * (1 + .045 * breathe)})`;
+        j.breathe = breathe;
         if (lab) {
           const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
           const hub = L.stage === 'hub', narrow = L.size.w < 760;
@@ -838,9 +830,11 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       }
       // 本帧没渲染到的卡片置 off（离开当前列/祖先列），下次再进当前列时从源头重生
       for (const [id, st] of vis) if (!touched.has(id)) st.role = 'off';
-      // 光球与水母的视频画面；水母第二形态（module/note）游动速度减半——视觉上"安静下来的水母"
+      // 光球与水母的视频画面；水母视频播放速度随呼吸相位调制（触手律动，用户令十三轮），
+      // 第二形态（module/note）半速安静
       for (const [vid, pair] of Object.entries(vids.current)) {
-        if (pair.video) pair.video.playbackRate = vid === 'orb' ? 1 : (L.stage === 'hub' ? 1 : .5);
+        if (pair.video) pair.video.playbackRate = vid === 'orb' ? 1
+          : (L.stage === 'hub' ? 1 + .13 * (S.jelly[vid]?.breathe || 0) : .5);
         paintVideo(pair);
       }
     };
