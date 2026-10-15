@@ -279,7 +279,7 @@ export function targets(L, t) {
       const d = Math.hypot(dx, dy), minD = 128;
       if (d > 0.01 && d < minD) {
         // 软推（用户令九轮）：每帧最多推 6px 渐进分开，不再一步推到位——多只拖到一起时不会互挤跳变下沉
-        const nx = dx / d, ny = dy / d, push = Math.min(6, (minD - d) / 3);
+        const nx = dx / d, ny = dy / d, push = Math.min(14, (minD - d) / 2);
         A.rm.x += nx * push; A.rm.y += ny * push; B.rm.x -= nx * push; B.rm.y -= ny * push;
         const dv = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
         if (dv < 0) {
@@ -325,19 +325,26 @@ export function targets(L, t) {
         if (vn < 0) { const vAbs = Math.max(10, -vn); rm.vx += nx * (vAbs + vn); rm.vy += ny * (vAbs + vn); rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 2; }
       }
     });
+    // 吸附互斥（用户令十一轮）：鼠标同时靠近多只时只吸最近的一只——否则多只一起贴到鼠标上完全重叠
+    let attCandidate = null, attDist = 1e9;
+    if (L.smx != null) MODULES.forEach((m, i) => {
+      const {rm, bx, by} = js[i];
+      const d = Math.hypot(L.smx - (bx + rm.x), L.smy - (by + rm.y));
+      if (d < attDist) { attDist = d; attCandidate = m.id; }
+    });
     MODULES.forEach((m, i) => {
       const {rm, bx, by} = js[i];
       // 左右摆动严格对称 + 姿态随移动方向动态倾倒；惯性余波（脱钩后 calmT 窗口内摆幅渐大渐收）
       const swayAmp = 5 + Math.min(3, Math.abs(rm.vx) * .3) + (rm.calmT && t < rm.calmT ? 5 * (rm.calmT - t) / 2.2 : 0);
       const velTilt = clamp(rm.vx * .9, -11, 11);
       const jj = {x: bx + rm.x, y: by + rm.y + swim * 14 * Math.sin(t * .8 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1,
-        tilt: swim * (swayAmp * Math.sin(t * 1.35 + i * 1.3) + velTilt), pull: 0, calm: rm.calmT && t < rm.calmT};
+        tilt: swim * (swayAmp * Math.sin(t * 1.35 + i * 1.3) + velTilt), pull: 0, calm: rm.calmT && t < rm.calmT, vx: rm.vx, vy: rm.vy};
       // 鼠标交互（用户令八轮重设计）：中间强吸附——水母头部吸在鼠标箭头上整体跟随漂浮，
       // 随移动方向明显倾斜（向右移右倾、向左移左倾）；只有鼠标快速甩动(>950px/s)才拉脱带惯性飘逸；
       // 出屏/压走廊/压光球=反弹脱钩。外圈(150 内非吸附)保持渐进吸附引力
       if (L.smx != null) {
         const adx = L.smx - jj.x, ady = L.smy - jj.y, add = Math.hypot(adx, ady);
-        if (!rm.att && add < jj.s * .5) { rm.att = true; rm.ax = null; rm.ay = null; }
+        if (!rm.att && add < jj.s * .5 && m.id === attCandidate) { rm.att = true; rm.ax = null; rm.ay = null; }
         if (rm.att) {
           const detach = (nx, ny) => {   // 脱钩：位置写回漫游坐标；反弹=给定法线初速，甩脱=拖动惯性延续（卸力飘逸）
             rm.att = false; rm.ax = null; rm.ay = null;
@@ -363,9 +370,6 @@ export function targets(L, t) {
             rm.ay = rm.ay == null ? jj.y : rm.ay + (L.smy - rm.ay) * k;
             jj.x = rm.ax; jj.y = rm.ay + jj.s * .35;   // 头部吸在鼠标箭头上（头=中心上方 s*.35）
             jj.pull = 1; jj.s *= 1.08; jj.att = true;
-            // 被吸着漂浮的姿态（九轮修正）：只用慢平滑速度的倾斜（mvxT），去掉自主摆动项——
-            // 方向感稳定、无左右拉扯抖动；向右移右倾、向左移左倾
-            jj.tilt = clamp((L.mvxT || 0) * .055, -35, 35);
             // 硬约束：不出屏幕、不压别的神经走廊、不压光球——碰到即反弹脱钩回漫游
             const PAD = 92;
             let bn = null;
@@ -612,14 +616,20 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         let fv = fv0;
         if (!L.reduced && L.smx != null) { const ddx = L.smx - x, ddy = L.smy - y; const dd = Math.hypot(ddx, ddy); if (dd < 150) fv = Math.max(fv, (1 - dd / 150) * .6); }
         if (el) el.style.setProperty('--fl', fv.toFixed(3));
-        // 头转向（灵动弹簧）：被吸着漂浮时不转朝向（姿态=随移动方向的倾斜，已含在 tg.tilt）；
-        // 平时朝向光标；脱钩惯性期不朝光标——从倾斜平滑回正，不甩头（用户令七/八轮）
+        // 真实水母姿态（用户令十一轮）：身体朝向运动方向（被吸=鼠标移动方向、漫游/惯性=游动方向），
+        // 触须自然拖在后；速度太低（静止）时缓慢回正朝上；叠加轻微交替摆动（伞体脉冲推进感）——
+        // 不再固定一种姿态。全角度+最短路径，软弹簧平滑转向
         const hyS = j.hyS || (j.hyS = {x: 0, v: 0});
-        const yawT = tg.pull && !tg.att && !tg.calm ? clamp(Math.atan2(L.smx - x, -(L.smy - y)) * 180 / Math.PI, -38, 38) * Math.min(1, tg.pull * 1.4) : 0;
-        const hy = spring(hyS, yawT, dt, 16);
-        const tremor = tg.pull && !tg.att ? 2.2 * Math.sin(t * 2.6 + i) * Math.min(1, tg.pull * 1.5) : 0;
-        // 被吸着漂浮：倾斜随移动方向（clamp 放宽 ±42 表达明显倾角）；平时漫游 ±30
-        const rot = tg.att ? clamp(tg.tilt + hy * .3, -42, 42) : clamp(tg.tilt + hy + tremor, -30, 30);
+        let dirT = null;
+        const mvMag = Math.hypot(L.mvx || 0, L.mvy || 0);
+        if (tg.att && mvMag > 24) dirT = Math.atan2(L.mvy, L.mvx) * 180 / Math.PI + 90;   // +90=视频头朝上的补偿
+        else if (!tg.att) { const sp2 = Math.hypot(tg.vx || 0, tg.vy || 0); if (sp2 > 2.5) dirT = Math.atan2(tg.vy, tg.vx) * 180 / Math.PI + 90; }
+        let yawT = dirT == null ? 0 : dirT;
+        yawT = hyS.x + (((yawT - hyS.x) % 360) + 540) % 360 - 180;   // 归一到最短旋转路径
+        const hy = spring(hyS, yawT, dt, 12);
+        const swayBase = L.stage === 'hub' ? (tg.att ? 2.2 : 3.2) : 1;   // module=第二形态基本静定
+        const sway2 = !L.reduced ? swayBase * Math.sin(t * 1.35 + i * 1.3) : 0;
+        const rot = hy + sway2;
         if (inner) inner.style.transform = `rotate(${rot}deg) scaleX(${MOD_STYLE[m.id].flip}) scaleY(${L.stage === 'hub' ? 1 : .92})`;
         if (lab) {
           const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
