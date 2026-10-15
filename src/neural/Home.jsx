@@ -260,8 +260,8 @@ export function targets(L, t) {
         rm.vx += (Math.cos(rm.ang) * rm.spd - rm.vx) * Math.min(1, dt * .8);
         rm.vy += (Math.sin(rm.ang) * rm.spd * .4 - rm.vy) * Math.min(1, dt * .8);
         rm.x += rm.vx * dt; rm.y += rm.vy * dt;
-        const dHome = Math.hypot(rm.x, rm.y);   // 远超 600px 才有极弱归心（防集体漂到一侧）；拖动脱钩后就地漂浮，免归心 12s
-        if (dHome > 600 && t >= (rm.noHome || 0)) { rm.x -= rm.x / dHome * (dHome - 600) * dt * .5; rm.y -= rm.y / dHome * (dHome - 600) * dt * .5; }
+        // 归心已删（用户令十四轮）：脱钩后就地漂浮、原地自主漫游，不再被拉回椭圆原位；
+        // 漂边由屏幕边界反弹兜底
       }
       return {rm, bx: base[i].x, by: base[i].y};
     });
@@ -619,8 +619,8 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         let yawT = dirT == null ? 0 : dirT;
         yawT = hyS.x + (((yawT - hyS.x) % 360) + 540) % 360 - 180;   // 归一到最短旋转路径
         const hy = spring(hyS, yawT, dt, 6);   // 六轮弹簧刚度 12→6（用户令十三轮）：回正/转向更缓慢柔和丝滑
-        const swayBase = L.stage === 'hub' ? (tg.att ? 1.6 : 2.4) : .8;   // 摆频放缓 1.35→0.9，module=第二形态基本静定
-        const sway2 = !L.reduced ? swayBase * Math.sin(t * .9 + i * 1.3) : 0;
+        const swayBase = L.stage === 'hub' ? (tg.att ? 1.4 : 2.2) : .7;   // 摆动再放缓（0.9→0.7，十四轮第3条）；module=第二形态基本静定
+        const sway2 = !L.reduced ? swayBase * Math.sin(t * .7 + i * 1.3) : 0;
         // 呼吸律动（用户令十三轮）：膨胀收缩随呼吸相位起伏，触手由视频播放速度同相位调制——
         // 伞体鼓起时触手摆速也加快，像随光路脉动的水母
         const breathe = !L.reduced ? Math.sin(t * 1.5 + i * 2.1) : 0;

@@ -114,11 +114,20 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
    --pose 由 rAF 每帧写入当前姿态角（用户令十二轮）：光幕随身体旋转，横游时照亮身体后方而非屏幕下方 */
 .jelly::before { content: ''; position: absolute; inset: 4% -6% -26%; pointer-events: none; border-radius: 50%;
   transform: rotate(var(--pose, 0deg));
-  background: radial-gradient(ellipse 82% 48% at 50% 84%, color-mix(in srgb, var(--mod, #9ad) 13%, transparent), transparent 86%);
+  /* 三层错位光幕（十四轮第4条）：无单一圆弧边界，像真的光从身体漫射下来 */
+  background:
+    radial-gradient(ellipse 92% 54% at 46% 86%, color-mix(in srgb, var(--mod, #9ad) 10%, transparent), transparent 82%),
+    radial-gradient(ellipse 80% 46% at 56% 82%, color-mix(in srgb, var(--mod, #9ad) 9%, transparent), transparent 78%),
+    radial-gradient(ellipse 68% 38% at 50% 88%, color-mix(in srgb, var(--mod, #9ad) 7%, transparent), transparent 74%);
+  filter: blur(18px);
   opacity: calc(.55 + var(--fl, 0) * .5); }
-/* 蒙版拉柔（用户令十三轮）：实心区收窄+过渡带拉长，水母边缘更发散、与背景自然融合不显"黑色背景块" */
-.jelly-inner { position: relative; width: 100%; height: 100%; -webkit-mask-image: radial-gradient(ellipse 72% 76% at 50% 46%, #000 34%, rgba(0, 0, 0, .55) 55%, rgba(0, 0, 0, .18) 74%, transparent 98%); mask-image: radial-gradient(ellipse 72% 76% at 50% 46%, #000 34%, rgba(0, 0, 0, .55) 55%, rgba(0, 0, 0, .18) 74%, transparent 98%); }
-.jelly .vid { width: 100%; height: 100%; display: block; object-fit: cover; -webkit-mask-image: radial-gradient(ellipse 66% 70% at 50% 46%, #000 36%, rgba(0, 0, 0, .5) 58%, rgba(0, 0, 0, .16) 78%, transparent 98%); mask-image: radial-gradient(ellipse 66% 70% at 50% 46%, #000 36%, rgba(0, 0, 0, .5) 58%, rgba(0, 0, 0, .16) 78%, transparent 98%); }
+/* 双层错位蒙版 union（十四轮第4条）：两椭圆不同中心叠加，边界不规则——消"切面"感 */
+.jelly-inner { position: relative; width: 100%; height: 100%;
+  -webkit-mask-image: radial-gradient(ellipse 70% 74% at 50% 46%, #000 30%, rgba(0, 0, 0, .4) 58%, transparent 96%), radial-gradient(ellipse 58% 62% at 54% 50%, #000 26%, rgba(0, 0, 0, .35) 55%, transparent 92%);
+  mask-image: radial-gradient(ellipse 70% 74% at 50% 46%, #000 30%, rgba(0, 0, 0, .4) 58%, transparent 96%), radial-gradient(ellipse 58% 62% at 54% 50%, #000 26%, rgba(0, 0, 0, .35) 55%, transparent 92%); }
+.jelly .vid { width: 100%; height: 100%; display: block; object-fit: cover;
+  -webkit-mask-image: radial-gradient(ellipse 64% 68% at 50% 46%, #000 32%, rgba(0, 0, 0, .38) 60%, transparent 96%), radial-gradient(ellipse 54% 58% at 53% 50%, #000 28%, rgba(0, 0, 0, .32) 56%, transparent 92%);
+  mask-image: radial-gradient(ellipse 64% 68% at 50% 46%, #000 32%, rgba(0, 0, 0, .38) 60%, transparent 96%), radial-gradient(ellipse 54% 58% at 53% 50%, #000 28%, rgba(0, 0, 0, .32) 56%, transparent 92%); }
 .jelly:hover, .jelly.active { filter: brightness(calc(1.32 + var(--fl, 0) * .38)) saturate(1.15) drop-shadow(0 0 16px color-mix(in srgb, var(--mod, #fff) 42%, transparent)); }
 .jelly:focus-visible { outline: none; filter: brightness(1.5); }
 /* 标签始终压在所有水母的点击区之上，避免游动时被别的水母挡住 */
