@@ -272,6 +272,7 @@ export function targets(L, t) {
     });
     for (let i = 0; i < js.length; i++) for (let k = i + 1; k < js.length; k++) {   // 成对相撞：互换法向速度+位置各退一半重叠
       const A = js[i], B = js[k];
+      if (t < (A.rm.noHit || 0) || t < (B.rm.noHit || 0)) continue;   // 免疫期（刚脱钩的惯性飘逸不被立刻再弹）
       const dx = (A.bx + A.rm.x) - (B.bx + B.rm.x), dy = (A.by + A.rm.y) - (B.by + B.rm.y);
       const d = Math.hypot(dx, dy), minD = 150;
       if (d > 0.01 && d < minD) {
@@ -293,6 +294,7 @@ export function targets(L, t) {
     const abs = js.map(({rm, bx, by}) => [bx + rm.x, by + rm.y]);
     for (let i = 0; i < js.length; i++) {
       const rm = js[i].rm;
+      if (t < (rm.noHit || 0)) continue;   // 免疫期：脱钩后的惯性飘逸期跳过走廊反弹（防连环弹=抖动）
       for (let k = 0; k < js.length; k++) {
         if (k === i) continue;
         const ex = abs[k][0] - ocx, ey = abs[k][1] - ocy, elen = Math.hypot(ex, ey) || 1;
@@ -314,7 +316,7 @@ export function targets(L, t) {
       const swayAmp = 5 + Math.min(3, Math.abs(rm.vx) * .3) + (rm.calmT && t < rm.calmT ? 5 * (rm.calmT - t) / 2.2 : 0);
       const velTilt = clamp(rm.vx * .9, -11, 11);
       const jj = {x: bx + rm.x, y: by + rm.y + swim * 14 * Math.sin(t * .8 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1,
-        tilt: swim * (swayAmp * Math.sin(t * 1.35 + i * 1.3) + velTilt), pull: 0};
+        tilt: swim * (swayAmp * Math.sin(t * 1.35 + i * 1.3) + velTilt), pull: 0, calm: rm.calmT && t < rm.calmT};
       // 鼠标交互（用户令 10-15 四轮）：外圈渐进吸附（越近越强、循序渐进）、内层提起跟随；
       // 拖动脱钩后沿拖动方向漫游；拖动位置出屏/压进别的神经走廊=反弹脱钩（内层 s*.5 进、外圈 150 出迟滞）
       if (L.smx != null) {
@@ -335,6 +337,7 @@ export function targets(L, t) {
             else { rm.vx = (L.mvx || 0) * .012; rm.vy = (L.mvy || 0) * .012; }
             rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang; rm.turnAt = t + 2.6;
             rm.calmT = t + 2.2;   // 惯性余波窗口：脱钩后摆幅渐大渐收（触手甩回的余韵）
+            rm.noHit = t + .7;    // 碰撞免疫期（用户令七轮）：脱钩位置常在走廊排斥圈内，立即再弹=连环抖动
             jj.x = bx + rm.x; jj.y = by + rm.y;
           };
           if (add > 150) detach(null, null);   // 拉出感应圈：带惯性卸力，沿拖动方向飘逸漫游
@@ -342,12 +345,17 @@ export function targets(L, t) {
             const k = Math.min(1, (L.dt || 0) * 3.2);
             rm.ax = rm.ax == null ? jj.x : rm.ax + (L.smx - rm.ax) * k;
             rm.ay = rm.ay == null ? jj.y : rm.ay + (L.smy - rm.ay) * k;
-            // 头顶抓取（用户令五轮）：鼠标抓的是水母头，身体/触手垂在拖动方向后方——拖拽感；
-            // 静止悬停时头朝上（视频原生方向），中心垂在鼠标下方
+            // 头顶抓取（用户令五轮）+ 方向角平滑（用户令七轮：旧版在速度阈值附近硬切换方向=快速抖动）。
+            // dragAng 永远平滑收敛：拖动中→鼠标方向角，静止提起→-90°(头朝上)，无跳变；dragOn 迟滞进 40 出 18
             const mSp = Math.hypot(L.mvx || 0, L.mvy || 0);
-            const dxn = mSp > 26 ? (L.mvx || 0) / mSp : 0, dyn = mSp > 26 ? (L.mvy || 0) / mSp : -1;
-            jj.x = rm.ax - dxn * jj.s * .33;
-            jj.y = rm.ay - dyn * jj.s * .33;
+            if (L.dragOn == null) L.dragOn = false;
+            if (!L.dragOn && mSp > 40) L.dragOn = true;
+            if (L.dragOn && mSp < 18) L.dragOn = false;
+            const angT = L.dragOn ? Math.atan2(L.mvy, L.mvx) : -Math.PI / 2;
+            if (L.dragAng == null) L.dragAng = angT;
+            L.dragAng += Math.atan2(Math.sin(angT - L.dragAng), Math.cos(angT - L.dragAng)) * Math.min(1, (L.dt || 0) * 5);
+            jj.x = rm.ax - Math.cos(L.dragAng) * jj.s * .33;
+            jj.y = rm.ay - Math.sin(L.dragAng) * jj.s * .33;
             jj.pull = Math.max(jj.pull, .55); jj.s *= 1.05; jj.att = true;
             // 硬约束（用户令）：不出屏幕、不压别的神经丝走廊——碰到即反弹脱钩回漫游
             const PAD = 92;
@@ -585,22 +593,20 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         let fv = fv0;
         if (!L.reduced && L.smx != null) { const ddx = L.smx - x, ddy = L.smy - y; const dd = Math.hypot(ddx, ddy); if (dd < 150) fv = Math.max(fv, (1 - dd / 150) * .6); }
         if (el) el.style.setProperty('--fl', fv.toFixed(3));
-        // 头转向（灵动弹簧）：被拖动时头朝拖动方向、触手在后跟随（全角度+最短路径旋转，用户令四轮）；
-        // 平时朝向光标（±38° 内），弹簧带轻微过冲=脉冲式转向的活物感
+        // 头转向（灵动弹簧）：拖动时头朝拖动方向（dragAng 平滑角，无阈值跳变）；平时朝向光标。
+        // 脱钩惯性期（calm）不朝光标——从拖动角平滑回正，不甩头（用户令七轮）。
+        // 注：rotate 的屏幕方向与 scaleX 镜像无关（七轮修正：去掉错误的 flip 补偿，镜像水母倾倒同向）
         const hyS = j.hyS || (j.hyS = {x: 0, v: 0});
-        const mSpd = Math.hypot(L.mvx || 0, L.mvy || 0);
-        const dragging = tg.att && mSpd > 26;
+        const dragging = tg.att && L.dragOn;
         let yawT;
         if (dragging) {
-          let yd = Math.atan2(L.mvy, L.mvx) * 180 / Math.PI + 90 - 8;   // +90=视频头朝上的补偿；-8=身体滞后微后仰（拖拽感）
-          yawT = hyS.x + (((yd - hyS.x) % 360) + 540) % 360 - 180;  // 归一到最短旋转路径
-        } else yawT = tg.pull ? clamp(Math.atan2(L.smx - x, -(L.smy - y)) * 180 / Math.PI, -38, 38) * Math.min(1, tg.pull * 1.4) : 0;
+          const yd = L.dragAng * 180 / Math.PI + 90 - 8;   // +90=视频头朝上的补偿；-8=身体滞后微后仰（拖拽感）
+          yawT = hyS.x + (((yd - hyS.x) % 360) + 540) % 360 - 180;  // 最短旋转路径
+        } else yawT = tg.pull && !tg.calm ? clamp(Math.atan2(L.smx - x, -(L.smy - y)) * 180 / Math.PI, -38, 38) * Math.min(1, tg.pull * 1.4) : 0;
         const hy = spring(hyS, yawT, dt, 16);
         const tremor = tg.pull && !dragging ? 2.2 * Math.sin(t * 2.6 + i) * Math.min(1, tg.pull * 1.5) : 0;
-        // 姿态角乘 flip 补偿镜像（kb/decisions/services 是 scaleX(-1) 水母）：保证群体倾倒同向、左右等幅
-        const flipX = MOD_STYLE[m.id].flip;
-        const rot = dragging ? (hy + tg.tilt * .4) * flipX : clamp((tg.tilt + hy + tremor) * flipX, -30, 30);
-        if (inner) inner.style.transform = `rotate(${rot}deg) scaleX(${flipX}) scaleY(${L.stage === 'hub' ? 1 : .92})`;
+        const rot = dragging ? hy + tg.tilt * .4 : clamp(tg.tilt + hy + tremor, -30, 30);
+        if (inner) inner.style.transform = `rotate(${rot}deg) scaleX(${MOD_STYLE[m.id].flip}) scaleY(${L.stage === 'hub' ? 1 : .92})`;
         if (lab) {
           const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
           const hub = L.stage === 'hub', narrow = L.size.w < 760;
