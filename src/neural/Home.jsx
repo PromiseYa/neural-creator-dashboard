@@ -8,7 +8,9 @@ import {CONFIG} from '../config';
 import {wvFocus, wvBlur} from '../data/live';
 import {glowSprite} from './sprites';
 
-const FLIP = {tasks: 1, kb: -1, decisions: -1, memory: 1, services: -1};
+// 水母朝向统一（用户令十轮）：视频内容自带姿态（触须垂向一侧），镜像组(flip=-1)的内容左右翻转后，
+// 与非镜像组的倾斜视觉永远相反——反向移动时"头倾了但触须还往同侧拖"=摆不回来的别扭感。统一 flip=1
+const FLIP = {tasks: 1, kb: 1, decisions: 1, memory: 1, services: 1};
 export const MOD_STYLE = Object.fromEntries(Object.entries(T.modules).map(([id, m]) => [id, {...m, flip: FLIP[id]}]));
 
 export const split = n => ({out: n.out - n.mutual, back: n.in - n.mutual, both: n.mutual});
