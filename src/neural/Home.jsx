@@ -258,8 +258,8 @@ export function targets(L, t) {
         rm.vx += (Math.cos(rm.ang) * rm.spd - rm.vx) * Math.min(1, dt * .8);
         rm.vy += (Math.sin(rm.ang) * rm.spd * .4 - rm.vy) * Math.min(1, dt * .8);
         rm.x += rm.vx * dt; rm.y += rm.vy * dt;
-        const dHome = Math.hypot(rm.x, rm.y);   // 远超 600px 才有极弱归心（防集体漂到一侧，平时感知不到）
-        if (dHome > 600) { rm.x -= rm.x / dHome * (dHome - 600) * dt * .5; rm.y -= rm.y / dHome * (dHome - 600) * dt * .5; }
+        const dHome = Math.hypot(rm.x, rm.y);   // 远超 600px 才有极弱归心（防集体漂到一侧）；拖动脱钩后就地漂浮，免归心 12s
+        if (dHome > 600 && t >= (rm.noHome || 0)) { rm.x -= rm.x / dHome * (dHome - 600) * dt * .5; rm.y -= rm.y / dHome * (dHome - 600) * dt * .5; }
       }
       return {rm, bx: base[i].x, by: base[i].y};
     });
@@ -274,9 +274,10 @@ export function targets(L, t) {
       const A = js[i], B = js[k];
       if (t < (A.rm.noHit || 0) || t < (B.rm.noHit || 0)) continue;   // 免疫期（刚脱钩的惯性飘逸不被立刻再弹）
       const dx = (A.bx + A.rm.x) - (B.bx + B.rm.x), dy = (A.by + A.rm.y) - (B.by + B.rm.y);
-      const d = Math.hypot(dx, dy), minD = 150;
+      const d = Math.hypot(dx, dy), minD = 128;
       if (d > 0.01 && d < minD) {
-        const nx = dx / d, ny = dy / d, push = (minD - d) / 2;
+        // 软推（用户令九轮）：每帧最多推 6px 渐进分开，不再一步推到位——多只拖到一起时不会互挤跳变下沉
+        const nx = dx / d, ny = dy / d, push = Math.min(6, (minD - d) / 3);
         A.rm.x += nx * push; A.rm.y += ny * push; B.rm.x -= nx * push; B.rm.y -= ny * push;
         const dv = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
         if (dv < 0) {
@@ -303,7 +304,7 @@ export function targets(L, t) {
         const px = ocx + ux * proj, py = ocy + uy * proj;
         const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .62 + 22;
         if (d > 0.01 && d < minD) {
-          const nx = dx / d, ny = dy / d, push = minD - d;
+          const nx = dx / d, ny = dy / d, push = Math.min(8, minD - d);   // 限速渐推（防跳变）
           rm.x += nx * push; rm.y += ny * push; abs[i][0] += nx * push; abs[i][1] += ny * push;
           const vn = rm.vx * nx + rm.vy * ny;
           if (vn < 0) { const vAbs = Math.max(9, -vn); rm.vx += nx * (vAbs + vn); rm.vy += ny * (vAbs + vn); rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; }   // 轻擦神经丝也有可见反弹（法向反射速度保底 9px/s）
@@ -316,7 +317,7 @@ export function targets(L, t) {
       const ax2 = bx + rm.x, ay2 = by + rm.y;
       const dx = ax2 - ocx, dy = ay2 - ocy, d = Math.hypot(dx, dy), minD = res.orb.s * .38 + jsz * .28;
       if (d > .01 && d < minD) {
-        const nx = dx / d, ny = dy / d, push = minD - d;
+        const nx = dx / d, ny = dy / d, push = Math.min(8, minD - d);   // 限速渐推（防跳变）
         rm.x += nx * push; rm.y += ny * push;
         const vn = rm.vx * nx + rm.vy * ny;
         if (vn < 0) { const vAbs = Math.max(10, -vn); rm.vx += nx * (vAbs + vn); rm.vy += ny * (vAbs + vn); rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 2; }
@@ -348,19 +349,21 @@ export function targets(L, t) {
             }
             else { rm.vx = (L.mvx || 0) * .012; rm.vy = (L.mvy || 0) * .012; }
             rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang; rm.turnAt = t + 2.6;
-            rm.calmT = t + 2.2; rm.noHit = t + .7;
+            rm.calmT = t + 2.2; rm.noHit = t + 1.2;
+            rm.noHome = t + 12;   // 就地漂浮（用户令九轮）：脱钩处 12 秒免归心，不漂回原位
             jj.x = bx + rm.x; jj.y = by + rm.y;
           };
           const mvSpdNow = Math.hypot(L.mvx || 0, L.mvy || 0);
           if (mvSpdNow > 950) detach(null, null);   // 快速甩动才拉脱（距离不再脱钩，慢移一直吸着）
           else {
-            const k = Math.min(1, (L.dt || 0) * 4.5);   // 强吸附：贴住鼠标的跟随速度
+            const k = Math.min(1, (L.dt || 0) * 6.5);   // 强吸附（用户令九轮再加强）：贴住鼠标的跟随速度
             rm.ax = rm.ax == null ? jj.x : rm.ax + (L.smx - rm.ax) * k;
             rm.ay = rm.ay == null ? jj.y : rm.ay + (L.smy - rm.ay) * k;
             jj.x = rm.ax; jj.y = rm.ay + jj.s * .35;   // 头部吸在鼠标箭头上（头=中心上方 s*.35）
             jj.pull = 1; jj.s *= 1.08; jj.att = true;
-            // 被吸着漂浮的姿态：保持头朝上的自然漂浮 + 随移动方向的明显倾斜（左右跟随，用户令八轮）
-            jj.tilt = swim * swayAmp * .45 * Math.sin(t * 1.35 + i * 1.3) + clamp((L.mvx || 0) * .055, -35, 35);
+            // 被吸着漂浮的姿态（九轮修正）：只用慢平滑速度的倾斜（mvxT），去掉自主摆动项——
+            // 方向感稳定、无左右拉扯抖动；向右移右倾、向左移左倾
+            jj.tilt = clamp((L.mvxT || 0) * .055, -35, 35);
             // 硬约束：不出屏幕、不压别的神经走廊、不压光球——碰到即反弹脱钩回漫游
             const PAD = 92;
             let bn = null;
@@ -555,6 +558,12 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         const e = Math.min(1, dt * (1.5 + 2.5 * Math.min(1, spd / 1400)));
         L.smx += (px - L.smx) * e; L.smy += (py - L.smy) * e;
       }
+      // 姿态专用慢速平滑（用户令九轮）：倾斜角若直接吃鼠标速度，手部微抖=姿态左右抖动；
+      // mvxT 用 dt*3 慢一档，倾斜响应柔稳仍有方向感
+      if (L.mx != null) {
+        if (L.mvxT == null) { L.mvxT = L.mvx || 0; }
+        else L.mvxT += ((L.mvx || 0) - L.mvxT) * Math.min(1, dt * 3);
+      } else L.mvxT = 0;
       const T = targets(L, t);
       L.noteG = T.noteG || 1;   // 笔记模式整组缩放系数：水母标签同步缩放（文本框不缩会挤压且线条起点错位）
       if (T.fan) L.fanMeta = {panMax: T.fan.panMax || 0, n: L.items.length};
