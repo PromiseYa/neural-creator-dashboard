@@ -299,7 +299,7 @@ export function targets(L, t) {
         const ux = ex / elen, uy = ey / elen;
         const proj = clamp((abs[i][0] - ocx) * ux + (abs[i][1] - ocy) * uy, 0, elen);   // 线上最近点（含两端）
         const px = ocx + ux * proj, py = ocy + uy * proj;
-        const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .48 + 12;
+        const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .72 + 30;
         if (d > 0.01 && d < minD) {
           const nx = dx / d, ny = dy / d, push = minD - d;
           rm.x += nx * push; rm.y += ny * push; abs[i][0] += nx * push; abs[i][1] += ny * push;
@@ -360,7 +360,7 @@ export function targets(L, t) {
               const ux = ex / el2, uy = ey / el2;
               const proj = clamp((jj.x - ocx) * ux + (jj.y - ocy) * uy, 0, el2);
               const ddx = jj.x - (ocx + ux * proj), ddy = jj.y - (ocy + uy * proj), dd2 = Math.hypot(ddx, ddy);
-              if (dd2 < jsz * .48 + 12 && dd2 > .01) { bn = [ddx / dd2, ddy / dd2]; break; }
+              if (dd2 < jsz * .72 + 30 && dd2 > .01) { bn = [ddx / dd2, ddy / dd2]; break; }   // 靠近走廊边缘即反弹（用户令六轮：提前量 .48+12 → .72+30）
             }
             if (bn) detach(bn[0], bn[1]);
           }
