@@ -310,9 +310,8 @@ export function targets(L, t) {
     }
     MODULES.forEach((m, i) => {
       const {rm, bx, by} = js[i];
-      // 左右摆动严格对称 + 姿态随移动方向动态倾倒（用户令 10-15 三轮）：
-      // 摆动=零均值正弦（左右等幅）；倾倒=速度方向函数（向左游头左倾、向右游头右倾，|vx| 对称等幅）
-      const swayAmp = 5 + Math.min(3, Math.abs(rm.vx) * .3);
+      // 左右摆动严格对称 + 姿态随移动方向动态倾倒；惯性余波（脱钩后 calmT 窗口内摆幅渐大渐收）
+      const swayAmp = 5 + Math.min(3, Math.abs(rm.vx) * .3) + (rm.calmT && t < rm.calmT ? 5 * (rm.calmT - t) / 2.2 : 0);
       const velTilt = clamp(rm.vx * .9, -11, 11);
       const jj = {x: bx + rm.x, y: by + rm.y + swim * 14 * Math.sin(t * .8 + i * 2.1), s: narrow ? 92 : clamp(W * .12, 120, 184), o: 1,
         tilt: swim * (swayAmp * Math.sin(t * 1.35 + i * 1.3) + velTilt), pull: 0};
@@ -322,22 +321,33 @@ export function targets(L, t) {
         const adx = L.smx - jj.x, ady = L.smy - jj.y, add = Math.hypot(adx, ady);
         if (!rm.att && add < jj.s * .5) { rm.att = true; rm.ax = null; rm.ay = null; }
         if (rm.att) {
-          const detach = (nx, ny) => {   // 脱钩：位置写回漫游坐标，反弹初速=给定法线（无给定时按拖动方向漫游）
+          const detach = (nx, ny) => {   // 脱钩：位置写回漫游坐标；反弹=给定法线初速，自然脱钩=拖动惯性延续（卸力飘逸）
             rm.att = false; rm.ax = null; rm.ay = null;
             rm.x = jj.x - bx; rm.y = jj.y - by;
             const mvSpd = Math.hypot(L.mvx || 0, L.mvy || 0);
             if (nx != null) { const bs = 26; rm.vx = nx * bs; rm.vy = ny * bs * .8; }
-            else if (mvSpd > 40) { const dr = Math.min(7.5, 1.8 + mvSpd / 260); rm.ang = Math.atan2(L.mvy, L.mvx); rm.vx = Math.cos(rm.ang) * dr; rm.vy = Math.sin(rm.ang) * dr * .45; rm.spd = dr; }
+            else if (mvSpd > 40) {
+              // 惯性初速=拖动速度延续（8~55px/s），targetSpd 低+turnAt 长保持=先飘逸后缓收（卸力感）
+              const dr = Math.min(55, Math.max(8, mvSpd * .02));
+              rm.ang = Math.atan2(L.mvy, L.mvx); rm.vx = Math.cos(rm.ang) * dr; rm.vy = Math.sin(rm.ang) * dr * .45;
+              rm.spd = dr; rm.targetSpd = 3;
+            }
             else { rm.vx = (L.mvx || 0) * .012; rm.vy = (L.mvy || 0) * .012; }
             rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang; rm.turnAt = t + 2.6;
+            rm.calmT = t + 2.2;   // 惯性余波窗口：脱钩后摆幅渐大渐收（触手甩回的余韵）
             jj.x = bx + rm.x; jj.y = by + rm.y;
           };
-          if (add > 150) detach(null, null);   // 拉出感应圈：沿拖动方向漫游
+          if (add > 150) detach(null, null);   // 拉出感应圈：带惯性卸力，沿拖动方向飘逸漫游
           else {
             const k = Math.min(1, (L.dt || 0) * 3.2);
             rm.ax = rm.ax == null ? jj.x : rm.ax + (L.smx - rm.ax) * k;
             rm.ay = rm.ay == null ? jj.y : rm.ay + (L.smy - rm.ay) * k;
-            jj.x = rm.ax; jj.y = rm.ay;
+            // 头顶抓取（用户令五轮）：鼠标抓的是水母头，身体/触手垂在拖动方向后方——拖拽感；
+            // 静止悬停时头朝上（视频原生方向），中心垂在鼠标下方
+            const mSp = Math.hypot(L.mvx || 0, L.mvy || 0);
+            const dxn = mSp > 26 ? (L.mvx || 0) / mSp : 0, dyn = mSp > 26 ? (L.mvy || 0) / mSp : -1;
+            jj.x = rm.ax - dxn * jj.s * .33;
+            jj.y = rm.ay - dyn * jj.s * .33;
             jj.pull = Math.max(jj.pull, .55); jj.s *= 1.05; jj.att = true;
             // 硬约束（用户令）：不出屏幕、不压别的神经丝走廊——碰到即反弹脱钩回漫游
             const PAD = 92;
@@ -582,7 +592,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         const dragging = tg.att && mSpd > 26;
         let yawT;
         if (dragging) {
-          let yd = Math.atan2(L.mvy, L.mvx) * 180 / Math.PI + 90;   // +90=视频头朝上的补偿
+          let yd = Math.atan2(L.mvy, L.mvx) * 180 / Math.PI + 90 - 8;   // +90=视频头朝上的补偿；-8=身体滞后微后仰（拖拽感）
           yawT = hyS.x + (((yd - hyS.x) % 360) + 540) % 360 - 180;  // 归一到最短旋转路径
         } else yawT = tg.pull ? clamp(Math.atan2(L.smx - x, -(L.smy - y)) * 180 / Math.PI, -38, 38) * Math.min(1, tg.pull * 1.4) : 0;
         const hy = spring(hyS, yawT, dt, 16);
