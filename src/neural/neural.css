@@ -121,13 +121,16 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
     radial-gradient(ellipse 68% 38% at 50% 88%, color-mix(in srgb, var(--mod, #9ad) 7%, transparent), transparent 74%);
   filter: blur(18px);
   opacity: calc(.55 + var(--fl, 0) * .5); }
-/* 双层错位蒙版 union（十四轮第4条）：两椭圆不同中心叠加，边界不规则——消"切面"感 */
-.jelly-inner { position: relative; width: 100%; height: 100%;
-  -webkit-mask-image: radial-gradient(ellipse 70% 74% at 50% 46%, #000 30%, rgba(0, 0, 0, .4) 58%, transparent 96%), radial-gradient(ellipse 58% 62% at 54% 50%, #000 26%, rgba(0, 0, 0, .35) 55%, transparent 92%);
-  mask-image: radial-gradient(ellipse 70% 74% at 50% 46%, #000 30%, rgba(0, 0, 0, .4) 58%, transparent 96%), radial-gradient(ellipse 58% 62% at 54% 50%, #000 26%, rgba(0, 0, 0, .35) 55%, transparent 92%); }
+/* inner 不再叠蒙版（用户令十五轮）：蒙版只留 .vid 一层——双层叠加的半透黑灰段就是"背景板"感来源 */
+.jelly-inner { position: relative; width: 100%; height: 100%; }
+/* 视频画布（用户令十五轮）：screen 混合=黑底自动全透（无背景板），对比度增强吃掉灰雾；
+   以伞体(26%)为锚 scaleY 1.18 向下拉伸=触手加长，柳絮般拖尾；单层快速跌落蒙版减少半透黑灰段 */
 .jelly .vid { width: 100%; height: 100%; display: block; object-fit: cover;
-  -webkit-mask-image: radial-gradient(ellipse 64% 68% at 50% 46%, #000 32%, rgba(0, 0, 0, .38) 60%, transparent 96%), radial-gradient(ellipse 54% 58% at 53% 50%, #000 28%, rgba(0, 0, 0, .32) 56%, transparent 92%);
-  mask-image: radial-gradient(ellipse 64% 68% at 50% 46%, #000 32%, rgba(0, 0, 0, .38) 60%, transparent 96%), radial-gradient(ellipse 54% 58% at 53% 50%, #000 28%, rgba(0, 0, 0, .32) 56%, transparent 92%); }
+  mix-blend-mode: screen;
+  filter: brightness(1.15) contrast(1.28);
+  transform: scaleY(1.18); transform-origin: 50% 26%;
+  -webkit-mask-image: radial-gradient(ellipse 64% 68% at 50% 44%, #000 36%, rgba(0, 0, 0, .45) 56%, rgba(0, 0, 0, .1) 72%, transparent 92%);
+  mask-image: radial-gradient(ellipse 64% 68% at 50% 44%, #000 36%, rgba(0, 0, 0, .45) 56%, rgba(0, 0, 0, .1) 72%, transparent 92%); }
 .jelly:hover, .jelly.active { filter: brightness(calc(1.32 + var(--fl, 0) * .38)) saturate(1.15) drop-shadow(0 0 16px color-mix(in srgb, var(--mod, #fff) 42%, transparent)); }
 .jelly:focus-visible { outline: none; filter: brightness(1.5); }
 /* 标签始终压在所有水母的点击区之上，避免游动时被别的水母挡住 */

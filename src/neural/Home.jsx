@@ -348,7 +348,7 @@ export function targets(L, t) {
       // 出屏/压走廊/压光球=反弹脱钩。外圈(150 内非吸附)保持渐进吸附引力
       if (L.smx != null) {
         const adx = L.smx - jj.x, ady = L.smy - jj.y, add = Math.hypot(adx, ady);
-        if (!rm.att && add < jj.s * .5 && m.id === attCandidate) { rm.att = true; rm.ax = null; rm.ay = null; }
+        if (!rm.att && add < jj.s * .5 && m.id === attCandidate && t >= (rm.noPull || 0)) { rm.att = true; rm.ax = null; rm.ay = null; }
         if (rm.att) {
           const detach = (nx, ny) => {   // 脱钩：位置写回漫游坐标；反弹=给定法线初速，甩脱=拖动惯性延续（卸力飘逸）
             rm.att = false; rm.ax = null; rm.ay = null;
@@ -363,7 +363,7 @@ export function targets(L, t) {
             else { rm.vx = (L.mvx || 0) * .012; rm.vy = (L.mvy || 0) * .012; }
             rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang; rm.turnAt = t + 2.6;
             rm.calmT = t + 2.2; rm.noHit = t + 1.2;
-            rm.noHome = t + 12;   // 就地漂浮（用户令九轮）：脱钩处 12 秒免归心，不漂回原位
+            rm.noPull = t + 2.8;   // 引力免疫（用户令十五轮）：甩脱瞬间鼠标还在身边，外圈引力会立即拽回=「弹回去」——免疫期内安静飘走
             jj.x = bx + rm.x; jj.y = by + rm.y;
           };
           const mvSpdNow = Math.hypot(L.mvx || 0, L.mvy || 0);
@@ -381,7 +381,7 @@ export function targets(L, t) {
             if (jj.x < PAD) jj.x = PAD; else if (jj.x > W - PAD) jj.x = W - PAD;
             if (jj.y < PAD - 10) jj.y = PAD - 10; else if (jj.y > H - PAD + 10) jj.y = H - PAD + 10;
           }
-        } else if (add < 150 && add > 2) { const u = 1 - add / 150; const f = Math.pow(u, 1.8) * 60; jj.x += adx / add * f; jj.y += ady / add * f; jj.s *= 1 - u * .2; jj.pull = u; }
+        } else if (add < 150 && add > 2 && t >= (rm.noPull || 0)) { const u = 1 - add / 150; const f = Math.pow(u, 1.8) * 60; jj.x += adx / add * f; jj.y += ady / add * f; jj.s *= 1 - u * .2; jj.pull = u; }
       } else rm.att = false;
       jj.tilt = clamp(jj.tilt, -26, 26);
       res.jelly[m.id] = jj;
