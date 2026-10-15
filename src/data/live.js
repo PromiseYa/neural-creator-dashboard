@@ -33,7 +33,7 @@ export const wvBlur = () => { try { window.chrome?.webview?.postMessage('star-in
 // 一次全量拉取：工作站实体 + KB 现场 + memorycore 状态 + 核心服务探测 + 累计完成任务（vite 只读直查 hub.db）。
 export async function fetchEcosystem() {
   const [ent, kb, mem, done] = await Promise.allSettled([
-    getJSON('/hub/api/entities'),
+    getJSON('/api/entities'),   // 8331 已脱钩（用户令 10-15）：vite 中间件只读直查 hub.db，8331 停了星图照常
     getJSON('/api/kb-graph', 8000),
     getJSON('/api/memory-state', 2500),
     getJSON('/api/hub-done', 5000)
@@ -44,14 +44,14 @@ export async function fetchEcosystem() {
   const memState = mem.status === 'fulfilled' && mem.value?.ok ? mem.value : null;
   const doneRows = done.status === 'fulfilled' && done.value?.ok ? (done.value.rows || []) : [];
 
-  // 服务舱：四个核心端点探测 + 常驻工作者（来自实体心跳，cron 型不进，避免一片红）
+  // 服务舱：三个核心端点独立探测 + 常驻工作者（来自实体心跳，cron 型不进，避免一片红）
   const [hubOK, panelOK, kbOK] = await Promise.all([
-    Promise.resolve(!!entities),
+    alive('/hub/api/ping'),   // 8331 数据已脱钩：在线与否独立 ping（断了只红卡片，不影响星图数据）
     alive('/panel/api/status'),
     alive('/kb/healthz')   // kbserve 根路由是 404，健康探测必须打 /healthz（实测 200），否则在线服务被误报离线
   ]);
   const services = [
-    {id: 'hub', name: '工作站 8331', ok: hubOK, group: 'core', desc: '任务/拍板/实体投影（本图主数据源）', url: 'http://127.0.0.1:8331/'},
+    {id: 'hub', name: '工作站 8331', ok: hubOK, group: 'core', desc: '工作站底座（星图已直读 hub.db 脱钩）', url: 'http://127.0.0.1:8331/'},
     {id: 'panel', name: '老面板 8330', ok: panelOK, group: 'core', desc: '现役写接口所在', url: 'http://127.0.0.1:8330/'},
     {id: 'kbserve', name: '检索服务 8342', ok: kbOK, group: 'core', desc: 'KB 语义+关键词混合检索'},
     ...(data.workers || []).filter(w => !w.retired && w.type === 'resident')

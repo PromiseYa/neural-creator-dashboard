@@ -231,14 +231,88 @@ function detailPlugin() {
   };
 }
 
+// ---- 8331 脱钩（用户令 10-15）：实体快照不再依赖 8331 进程，中间件只读直查 hub.db + registry.json ----
+// 字段形状逐项对齐 LoopDeck web/api/store.py 的投影（tasks/decisions/workers/events/vitals）；
+// 服务舱 8331 卡片改为独立 ping 探测——在线与否仍是事实，但星图数据不再跟着 8331 断。
+const REGISTRY = 'D:/Portable/Documents/工作管理/LoopDeck/workers/registry.json';
+const HB_DEFAULT_IV = 900, HB_GRACE_X = 2.0;
+const TASK_OPEN = ['pending', 'waiting_confirm', 'dispatched', 'doing'];
+const hbState = (ts, iv) => {   // 心跳行 → ok/late/down 三态（只认数字 epoch，与 store._hb_state 同口径）
+  const age = Date.now() / 1000 - Number(ts);
+  if (!Number.isFinite(age)) return 'unknown';
+  if (!(iv > 0)) iv = HB_DEFAULT_IV;
+  return age <= iv ? 'ok' : age <= iv * HB_GRACE_X ? 'late' : 'down';
+};
+const parseOpts = raw => {
+  if (!raw) return [];
+  try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; }
+  catch { return String(raw).split('|').filter(Boolean); }
+};
+function entitiesPlugin() {
+  return {
+    name: 'hub-entities',
+    configureServer(server) {
+      server.middlewares.use('/api/entities', async (req, res) => {
+        const json = (code, obj) => { res.statusCode = code; res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify(obj)); };
+        try {
+          const {DatabaseSync} = await import('node:sqlite');
+          const db = new DatabaseSync(HUB_DB, {readOnly: true});
+          try {
+            const open = db.prepare(`SELECT id,title,status,priority,due,source,attachments,created_at,updated_at FROM tasks
+                                     WHERE status IN (?,?,?,?) ORDER BY updated_at DESC`).all(...TASK_OPEN);
+            const doneToday = db.prepare(`SELECT id,title,done_at FROM tasks WHERE status='done'
+                                          AND date(done_at)=date('now','localtime') ORDER BY done_at DESC`).all();
+            const decisions = db.prepare(`SELECT id,title,status,created_at,options FROM decisions
+                                          WHERE status='pending' ORDER BY created_at`).all();
+            for (const r of decisions) r.options = parseOpts(r.options);
+            const events = db.prepare(`SELECT id,ts,kind,actor,action,detail,task_id FROM events
+                                       ORDER BY id DESC LIMIT 40`).all();
+            // 工作者：registry.json（唯一注册表）× heartbeats 每名字取最新一行
+            let entries = [];
+            try { entries = JSON.parse(fs.readFileSync(REGISTRY, 'utf8')).workers || []; } catch {}
+            const latest = new Map();
+            for (const r of db.prepare('SELECT name, ts, expected_interval FROM heartbeats').all()) {
+              const old = latest.get(r.name);
+              if (old == null || (r.ts || 0) > (old.ts || 0)) latest.set(r.name, r);
+            }
+            const workers = entries.map(w => {
+              const hb = latest.get(w.id);
+              const iv = hb?.expected_interval || HB_DEFAULT_IV;
+              return {id: w.id, name: w.name, type: w.type, emoji: w.emoji, desc: w.desc,
+                retired: !!w.retired, hb_ts: hb?.ts ?? null,
+                hb_state: hb ? hbState(hb.ts, iv) : 'noreport'};
+            });
+            const openTasks = db.prepare(`SELECT count(*) c FROM tasks WHERE status IN (?,?,?,?)`).get(...TASK_OPEN).c;
+            const pendDec = db.prepare(`SELECT count(*) c FROM decisions WHERE status='pending'`).get().c;
+            const actAlarms = db.prepare(`SELECT count(*) c FROM alarms WHERE status='active'`).get().c;
+            const maxEv = db.prepare('SELECT coalesce(max(id),0) m FROM events').get().m;
+            const hbs = workers.filter(w => !w.retired).map(w => w.hb_state);
+            json(200, {ok: true, data: {
+              tasks: {open, done_today: doneToday},
+              decisions, workers, events,
+              vitals: {open_tasks: openTasks, pending_decisions: pendDec, active_alarms: actAlarms,
+                workers_ok: hbs.filter(s => s === 'ok').length,
+                workers_late: hbs.filter(s => s === 'late').length,
+                workers_down: hbs.filter(s => s === 'down' || s === 'noreport').length,
+                last_event_id: maxEv, ts: Date.now() / 1000}
+            }});
+          } finally { db.close(); }
+        } catch (e) {
+          json(500, {ok: false, err: String(e && e.message || e)});
+        }
+      });
+    }
+  };
+}
+
 // base 用相对路径，构建产物可以直接部署在任意子路径。
 // server.proxy：把本机三个现役服务挂成同源路径，页面零跨域直连：
-//   /hub/*   → 8331 工作站新底座（任务/拍板/工作者实体，只读）
+//   /hub/*   → 8331 工作站底座（星图数据已脱钩直读 hub.db；代理仅剩服务舱在线探测 /api/ping）
 //   /panel/* → 8330 老面板（写操作走这里）
 //   /kb/*    → 8342 检索服务（语义/关键词混合查询）
 export default defineConfig({
   base: './',
-  plugins: [kbGraphPlugin(), memoryStatePlugin(), detailPlugin()],
+  plugins: [kbGraphPlugin(), memoryStatePlugin(), detailPlugin(), entitiesPlugin()],
   server: {
     proxy: {
       '/hub': {target: 'http://127.0.0.1:8331', changeOrigin: true, rewrite: p => p.replace(/^\/hub/, '')},
