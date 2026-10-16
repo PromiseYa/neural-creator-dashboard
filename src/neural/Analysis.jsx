@@ -1,5 +1,5 @@
 import React, {useEffect, useMemo, useState} from 'react';
-import {KINDS, CONTENT, MODULES, neighbors, latent, askGraph, LINK_KINDS, LINK_EN, STATUS_ZH, PRIO_ZH} from './graph';
+import {KINDS, CONTENT, MODULES, neighbors, latent, askGraph, ecosystemAsk, LINK_KINDS, LINK_EN, STATUS_ZH, PRIO_ZH} from './graph';
 import {Icon} from './icons';
 import {stripFrontmatter, firstImage} from './markdown';
 import {wvFocus, wvBlur} from '../data/live';
@@ -121,21 +121,36 @@ function AskBox({graph, node, onGo}) {
   const [res, setRes] = useState(null);
   const [asking, setAsking] = useState(false);   // 输入框聚焦：壁纸模式输入法挂不上，提示改走点选/窗口
   const QUICK = ['相关内容', '双向连接', '最核心的内容'];
+  // 混合追问（10-16）：本地图谱规则 + 工作站全域命中 即时出卡，8342 KB 语义异步补第三张卡
+  const ask = text => {
+    const cards = askGraph(graph, text, node.id);
+    const eco = ecosystemAsk(graph, text);
+    setRes(eco ? [...cards, eco] : cards);
+    fetch(`/kb/search?q=${encodeURIComponent(text)}&top=3&rerank=false`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        const hits = d?.hits || [];
+        if (!hits.length) return;
+        const base = p => String(p || '').split(/[\\/]/).pop().replace(/\.md$/, '');
+        setRes(prev => prev && [...prev, {tone: 'info', title: `知识库命中 ${hits.length} 篇`, en: 'KB · kbserve',
+          text: hits.map(h => base(h.meta?.source_path)).slice(0, 3).join(' · ')}]);
+      }).catch(() => {});
+  };
   return <div className="an-ask">
     {res && <div className="an-ask-res">{res.map((c, i) => <div key={i} className={`ask-card mini tone-${c.tone}`}>
       <h4>{c.title} <em>{c.en}</em></h4><p>{c.text}</p>
       {c.items?.length > 0 && <div className="chip-row">{c.items.slice(0, 6).map(id => <Chip key={id} graph={graph} id={id} onGo={onGo}/>)}</div>}
     </div>)}</div>}
-    <form onSubmit={e => { e.preventDefault(); if (q.trim()) setRes(askGraph(graph, q, node.id)); }}>
+    <form onSubmit={e => { e.preventDefault(); if (q.trim()) ask(q); }}>
       <input value={q} onChange={e => setQ(e.target.value)} onFocus={e => { setAsking(true); wvFocus(e.target); }} onBlur={() => { setAsking(false); wvBlur(); }} placeholder="追问这条内容… Ask about this note" aria-label="追问这条内容"/>
       <button aria-label="提交"><Icon name="send" size={15}/></button>
     </form>
     <div className="an-ask-chips">
       <span className="me">快捷追问</span>
-      {QUICK.map(t => <button key={t} type="button" onClick={() => { setQ(t); setRes(askGraph(graph, t, node.id)); }}>{t}</button>)}
+      {QUICK.map(t => <button key={t} type="button" onClick={() => { setQ(t); ask(t); }}>{t}</button>)}
       {asking && <button type="button" className="win-open" onClick={() => window.open('http://127.0.0.1:5173/', '_blank')}>壁纸模式打不了中文 · 在窗口中打开<Icon name="outlink" size={11}/></button>}
     </div>
-    <div className="an-ask-foot"><span><Icon name="agent" size={13}/>我的图谱 <em>My graph</em></span><span><Icon name="spark" size={13}/>本地分析 <em>Local analysis</em></span></div>
+    <div className="an-ask-foot"><span><Icon name="agent" size={13}/>我的图谱 <em>My graph</em></span><span><Icon name="spark" size={13}/>图谱+工作站+KB 混合 <em>Hybrid</em></span></div>
   </div>;
 }
 
@@ -145,13 +160,41 @@ const sharedConcepts = (a, b) => (a.shared || []).filter(x => (b.shared || []).i
 // 附件文件本体走 vite 代理 /hub/attach/<tid>/<文件>，只读。
 const VIDEO_EXT = ['.mp4', '.mov', '.webm', '.avi', '.mkv'];
 const ATT_LOST = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="64"><rect fill="%2310151c" width="200" height="64" rx="8"/><text x="100" y="37" fill="%238b949e" font-size="11" text-anchor="middle">图片文件已不可用</text></svg>';
+// 附件大图查看器（10-16 升级）：默认等比适配整屏，滚轮以光标为锚缩放（0.1~8x）、按住拖拽平移、
+// 双击在适配/100% 间切换——长截图/大图都能完整看到每个角落；Esc 或点背景关闭。
 function Lightbox({src, onClose}) {
+  const [v, setV] = useState(null);   // {fit, z, tx, ty} 缩放/平移态（img 加载后才有 fit）
+  const drag = useRef(null);
   useEffect(() => {
     const key = e => { if (e.key === 'Escape' && !e.isComposing) onClose(); };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, [onClose]);
-  return <div className="lightbox" onClick={onClose} role="dialog" aria-label="附件大图，点击或 Esc 关闭"><img src={src} alt=""/></div>;
+  const stopAll = () => { drag.current = null; };
+  useEffect(() => {
+    window.addEventListener('pointerup', stopAll);
+    return () => window.removeEventListener('pointerup', stopAll);
+  }, []);
+  return <div className="lightbox" onClick={e => { if (e.target === e.currentTarget) onClose(); }} role="dialog" aria-label="附件大图，滚轮缩放，拖拽平移，Esc 关闭">
+    <img src={src} alt=""
+      onLoad={e => { const iw = e.currentTarget.naturalWidth, ih = e.currentTarget.naturalHeight;
+        const fit = Math.min((window.innerWidth * .92) / iw, (window.innerHeight * .9) / ih, 1);
+        setV({fit, z: fit, tx: 0, ty: 0}); }}
+      style={{transform: `translate(${v?.tx || 0}px, ${v?.ty || 0}px) scale(${v?.z || 1})`}}
+      onWheel={e => { e.preventDefault(); if (!v) return;
+        const k = e.deltaY < 0 ? 1.18 : 1 / 1.18;
+        const nz = Math.min(8, Math.max(0.1, v.z * k));
+        const box = e.currentTarget.getBoundingClientRect();
+        const px = e.clientX - (box.left + box.width / 2), py = e.clientY - (box.top + box.height / 2);
+        const r = nz / v.z;
+        setV({...v, z: nz, tx: px - (px - v.tx) * r, ty: py - (py - v.ty) * r}); }}
+      onDoubleClick={() => { if (!v) return; setV(Math.abs(v.z - v.fit) < .02 ? {...v, z: 1, tx: 0, ty: 0} : {...v, z: v.fit, tx: 0, ty: 0}); }}
+      onPointerDown={e => { e.preventDefault(); drag.current = {x: e.clientX, y: e.clientY, tx: v?.tx || 0, ty: v?.ty || 0}; e.currentTarget.setPointerCapture(e.pointerId); }}
+      onPointerMove={e => { if (!drag.current || !v) return;
+        setV({...v, tx: drag.current.tx + e.clientX - drag.current.x, ty: drag.current.ty + e.clientY - drag.current.y}); }}
+      onPointerUp={stopAll}/>
+    {v && <div className="lb-hud">滚轮缩放 {Math.round(v.z * 100 / (v.fit || 1))}% · 拖动平移 · 双击{Math.abs(v.z - v.fit) < .02 ? '原始尺寸' : '适配整屏'} · Esc 关闭</div>}
+  </div>;
 }
 function TaskExtra({tid, detail, onZoom}) {
   const events = detail?.events || [];
@@ -253,7 +296,10 @@ function analyze(graph, node, detail) {
     const notes = String(full.notes || '');
     const st = STATUS_ZH[t.status] || t.status || '—';
     const same = T.filter(x => x.task?.status === t.status).length;
-    const OPS = [['完成', 'Done', 'done', 'done'], ['进行中', 'Doing', 'doing', 'doing'], ['待确认', 'Wait', 'wait', 'waiting_confirm'], ['退回待办', 'Reopen', 'reopen', 'pending']];
+    // review=AI 申报专属态：人工通道只给 接受/打回（打回必填原因，走 hub.review 闸门），不给五态扇形
+    const OPS = t.status === 'review'
+      ? [['接受验收', 'Accept', 'accept', 'reviewOp'], ['打回重做', 'Reject', 'reject', 'reviewOp']]
+      : [['完成', 'Done', 'done', ''], ['进行中', 'Doing', 'doing', ''], ['待确认', 'Wait', 'wait', ''], ['退回待办', 'Reopen', 'reopen', '']];
     const extras = [];
     if (full.confidence) extras.push(['把握', 'Confidence', String(full.confidence), 'muted']);
     if (full.risk_level) extras.push(['风险级', 'Risk', String(full.risk_level), 'muted']);
@@ -261,8 +307,7 @@ function analyze(graph, node, detail) {
     if (full.rollback_ref) extras.push(['回滚点', 'Rollback', String(full.rollback_ref), 'muted']);
     return {
       badge: [st, 'Status'], status: `${t.id || ''} · 优先级 ${PRIO_ZH[t.priority] || t.priority || '—'} · 截止 ${t.due || '—'}${dueDays(t.due)}`,
-      ops: OPS.map(([zh, en, op, target]) => ({zh, en, op, cur: t.status === target})),
-      action: ['驾驶舱（备用）', 'Station · backup', {type: 'station'}],
+      ops: OPS.map(([zh, en, op, act]) => ({zh, en, op, act, cur: false})),
       metric: {label: '同状态任务', en: 'Same status', value: T.length ? 100 * same / T.length : 0, decimals: 0,
         level: t.status === 'doing' ? ['进行', 'Doing', 'high'] : t.status === 'waiting_confirm' ? ['待确认', 'Confirm', 'mid'] : ['排队', 'Queued', 'low'],
         delta: `${same}/${T.length}`, deltaEn: 'tasks', bars: T.map(x => ({v: 1, on: x === node, label: x.short}))},
@@ -284,7 +329,6 @@ function analyze(graph, node, detail) {
       badge: [dc.status === 'pending' ? '待拍板' : (dc.status || '已收口'), 'Decision'], status: `${dc.id || ''} · 提出 ${String(dc.created_at || full.created_at || '').slice(0, 16) || '—'}${settled && full.decided_at ? ` · 裁决 ${String(full.decided_at).slice(0, 16)}` : ''}`,
       decideOps: (opts.length ? opts.map(o => ({zh: `批准 ${o.key || ''}`, en: 'Approve', to: 'approved', choice: o.key})) : [{zh: '批准执行', en: 'Approve', to: 'approved'}])
         .concat([{zh: '否决', en: 'Reject', to: 'rejected'}, {zh: '销账', en: 'Resolve', to: 'resolved'}]),
-      action: ['驾驶舱（备用）', 'Station · backup', {type: 'station'}],
       metric: {label: '待拍板存量', en: 'Pending', value: D.length ? 100 * D.filter(x => x.decision?.status === 'pending').length / D.length : 0, decimals: 0,
         level: dc.status === 'pending' ? ['待办', 'Pending', 'high'] : ['已结', 'Settled', 'mid'],
         delta: `${D.length}`, deltaEn: 'decisions', bars: D.map(x => ({v: 1, on: x === node, label: x.short}))},
@@ -311,13 +355,32 @@ function analyze(graph, node, detail) {
       insights: [['条目内容', 'Content', mm.body || node.body || '（无摘要）', 'info']]
     };
   }
+  if (node.kind === 'command') {
+    const M = graph.nodes.filter(n => n.kind === 'command');
+    const cm = node.command || {};
+    const brief = String(cm.prompt || '').replace(/\s+/g, ' ').trim();
+    const done = M.filter(x => x.command?.status === 'done').length;
+    return {
+      badge: [{queued: '排队', dispatched: '已派', done: '完成', failed: '失败', pending_confirm: '待确认'}[cm.status] || cm.status || '—', 'Command'],
+      status: `${cm.id || ''} · 来源 ${cm.source || '—'} · 登记 ${String(cm.created_at || '').slice(0, 16)}${cm.task_id ? ` · 派生 ${cm.task_id}` : ''}${cm.rerun_of ? ` · 重跑自 ${cm.rerun_of}` : ''}`,
+      ops: cm.status === 'done' ? [] : [{zh: '一键重跑', en: 'Rerun', op: 'rerun', act: 'cmdOp'}],
+      metric: {label: '台账完成率', en: 'Done rate', value: M.length ? 100 * done / M.length : 0, decimals: 0,
+        level: cm.status === 'done' ? ['已结', 'Done', 'mid'] : cm.status === 'failed' ? ['失败', 'Failed', 'low'] : ['在途', 'Live', 'high'],
+        delta: `${done}/${M.length}`, deltaEn: 'commands', bars: M.map(x => ({v: 1, on: x === node, label: x.short}))},
+      tiles: [['works', M.length, '台账条数', 'Total'], ['agent', cm.task_id ? 1 : 0, '已派生', 'Task'], ['pulse', cm.status === 'done' ? 1 : 0, '已完结', 'Done'], ['file', brief.length, '指令字数', 'Chars']],
+      insights: [
+        ['指令内容', 'Prompt', brief || '（空指令）', 'info'],
+        ...(String(cm.result || '').trim() ? [['执行结果', 'Result', String(cm.result), 'gold']] : []),
+        ...(cm.status === 'pending_confirm' ? [['待确认', 'Gate', 'B 类/微信来源指令在确认闸门内，确认后才会派发。', 'warn']] : [])
+      ]
+    };
+  }
   if (node.kind === 'service') {
     const S = graph.nodes.filter(n => n.kind === 'service');
     const sv = node.service || {};
     const ok = S.filter(x => x.service?.ok).length;
     return {
       badge: [sv.ok ? '在线' : '离线', sv.ok ? 'Online' : 'Offline'], status: sv.desc || sv.name || '',
-      action: ['去驾驶舱看服务', 'Open station', {type: 'station'}],
       metric: {label: '服务在线率', en: 'Uptime', value: S.length ? 100 * ok / S.length : 0, decimals: 0,
         level: sv.ok ? ['健康', 'Healthy', 'high'] : ['异常', 'Down', 'low'],
         delta: `${ok}/${S.length}`, deltaEn: 'services online', bars: S.map(x => ({v: x.service?.ok ? 1 : 0.15, on: x === node, label: x.short}))},
@@ -440,7 +503,7 @@ export function Analysis({graph, node, module, onGo, onAction, onClose}) {
           {a.ops && <div className="an-ops">
             {a.ops.map(o => (
               <button key={o.op} className={`an-explore ghost op-btn${o.cur ? ' cur' : ''}`} disabled={o.cur}
-                onClick={() => onAction({type: 'taskOp', id: node.task?.id, op: o.op})}>
+                onClick={() => onAction({type: o.act || 'taskOp', id: node.task?.id || node.command?.id, op: o.op})}>
                 {o.cur ? '✓ ' : ''}{o.zh} <em>{o.en}</em>
               </button>
             ))}

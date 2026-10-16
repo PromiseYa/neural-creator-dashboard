@@ -44,22 +44,22 @@ export async function fetchEcosystem() {
   const memState = mem.status === 'fulfilled' && mem.value?.ok ? mem.value : null;
   const doneRows = done.status === 'fulfilled' && done.value?.ok ? (done.value.rows || []) : [];
 
-  // 服务舱：三个核心端点独立探测 + 常驻工作者（来自实体心跳，cron 型不进，避免一片红）
-  const [hubOK, panelOK, kbOK] = await Promise.all([
-    alive('/hub/api/ping'),   // 8331 数据已脱钩：在线与否独立 ping（断了只红卡片，不影响星图数据）
-    alive('/panel/api/status'),
+  // 服务舱：核心端点独立探测 + 常驻工作者（来自实体心跳，cron 型不进，避免一片红）
+  // 10-16 终局：8331 面板退役只剩引擎宿主（vite 子进程），两探活合一；不再展示"备用面板"卡
+  const [hubOK, kbOK] = await Promise.all([
+    alive('/hub/api/ping'),   // 引擎宿主在线与否独立 ping（断了只红卡片，不影响星图读数据）
     alive('/kb/healthz')   // kbserve 根路由是 404，健康探测必须打 /healthz（实测 200），否则在线服务被误报离线
   ]);
   const services = [
-    {id: 'hub', name: '工作站 8331', ok: hubOK, group: 'core', desc: '工作站底座（星图已直读 hub.db 脱钩）', url: 'http://127.0.0.1:8331/'},
-    {id: 'panel', name: '老面板 8330', ok: panelOK, group: 'core', desc: '现役写接口所在', url: 'http://127.0.0.1:8330/'},
+    {id: 'hub', name: '引擎宿主 8331', ok: hubOK, group: 'core', desc: '5引擎+写API（vite子进程，10-16引擎并轨）'},
     {id: 'kbserve', name: '检索服务 8342', ok: kbOK, group: 'core', desc: 'KB 语义+关键词混合检索'},
     ...(data.workers || []).filter(w => !w.retired && w.type === 'resident')
-      .map(w => ({id: w.id, name: `${w.emoji || '🔧'} ${w.name}`, ok: w.hb_state === 'ok', group: 'worker', desc: w.desc || '', state: w.hb_state, url: w.ui || undefined}))   // ui→url（批C）：registry 里 VPN路由 8321/驾驶舱 8330/悬浮球 float.html/RAG检索 8341 四个网页入口接进服务舱
+      .map(w => ({id: w.id, name: `${w.emoji || '🔧'} ${w.name}`, ok: w.hb_state === 'ok', group: 'worker', desc: w.desc || '', state: w.hb_state, url: w.ui || undefined}))   // ui→url（批C）：registry 里 VPN路由 8321/驾驶舱(备用8331)/RAG检索 8341 等网页入口接进服务舱；悬浮球已退役(10-16)
   ];
 
   return {
     tasks: [...(data.tasks?.open || []), ...doneRows],   // 未结 + 累计完成（done 行带 status='done'/done_at，任务流分类钻取用）
+    commands: data.commands || [],        // 指令台账 M-xxx（10-16 批2：任务流钻取"指令台账"卡）
     decisions: data.decisions || [],
     memories: memState?.items || [],        // memorycore 池条目（降级候选摘要）
     memState,                               // 池状态摘要（updated/pool_n/defer_n/sync）
@@ -70,7 +70,7 @@ export async function fetchEcosystem() {
   };
 }
 
-// 任务写操作：直连 8330 /api/task（经 vite 代理；本机回环免口令）。
+// 任务写操作：走 vite 代理 /panel→8331 引擎宿主（本机回环免口令）。
 // op 取值与面板一致：done 完成 / doing 进行中 / wait 待确认 / reopen 退回待办 / dispatch 派发；
 // note 改备注（note 字段全量覆盖）/ due 调截止（due 字段，空串=清除）——额外字段原样透传。
 export async function taskAction({op, id, ...rest}) {
@@ -97,6 +97,56 @@ export async function decideAction({id, to, choice}) {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({id, to, choice}),
+      signal: ctl.signal
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(timer); }
+}
+
+// 通用写通道（10-16 批1/批2）：/panel/api/action {op,args} —— 引擎宿主 actions.py 的 OPS 表
+// （task_add / decide_add / review_accept / review_reject / cmd_add / cmd rerun…全走 hub.py 同一写路径）
+export async function panelAction(op, args, ms = 12000) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch('/panel/api/action', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({op, args: args || {}}),
+      signal: ctl.signal
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(timer); }
+}
+
+// 指令台账操作：rerun 一键重跑 / confirm 确认派发 / reject 驳回（走旧 /api/command 端点）
+export async function cmdAction(payload) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 10000);
+  try {
+    const r = await fetch('/panel/api/command', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+      signal: ctl.signal
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(timer); }
+}
+
+// 附件上传（10-16 批1 新建任务模态）：{id, name, data_b64} → 引擎宿主落 attachments/<tid>/，
+// 图片触发后台视觉解析自动回填 notes（面板同链路）。
+export async function attachAction({id, name, data_b64}) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 60000);
+  try {
+    const r = await fetch('/panel/api/attach', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id, name, data_b64}),
       signal: ctl.signal
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);

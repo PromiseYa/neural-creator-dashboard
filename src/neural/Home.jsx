@@ -1,5 +1,5 @@
 import React, {useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback} from 'react';
-import {MODULES, KINDS, stats, askGraph, moduleOf, STATUS_ZH, PRIO_ZH, nodeBadge, TASK_OPS, ST_COLOR} from './graph';
+import {MODULES, KINDS, stats, askGraph, ecosystemAsk, moduleOf, STATUS_ZH, PRIO_ZH, nodeBadge, TASK_OPS, ST_COLOR} from './graph';
 import {Icon} from './icons';
 import {NetworkCanvas} from './NetworkCanvas';
 import {Analysis} from './Analysis';
@@ -133,20 +133,28 @@ export function moduleItems(graph, modId, zone) {
     return [...dirCards.sort((a, b) => b.count - a.count),
       ...roots.sort((a, b) => String(b.updated || '').localeCompare(String(a.updated || '')))];
   }
-  // 任务流两级钻取（与知识库/服务舱同款语法）：第一层=待办/今日完成/累计完成三张分类卡，
-  // 第二层=对应任务清单（done 任务带"完成"徽章，可点开详情，状态扇形可切回待办）
+  // 任务流两级钻取（与知识库/服务舱同款语法）：第一层=待办/待验收/今日完成/累计完成/指令台账分类卡，
+  // 第二层=对应清单（done 任务带"完成"徽章，可点开详情，状态扇形可切回待办）
   if (m.kind === 'task' && zone !== undefined) {
     const all = graph.nodes.filter(n => n.kind === 'task');
+    const cmds = graph.nodes.filter(n => n.kind === 'command');
     const today = new Date().toISOString().slice(0, 10);
     const doneList = all.filter(n => n.task?.status === 'done');
     const byDone = (a, b) => String(b.task?.done_at || '').localeCompare(String(a.task?.done_at || ''));
     if (!zone) {
       const open = all.filter(n => n.task?.status !== 'done');
       const card = (id, title, list) => ({id, kind: 'folder', title, short: title, count: list.length, unit: '条', path: title, level: 2});
-      return [card('f:task:open', '待办', open), card('f:task:today', '今日完成', doneList.filter(n => String(n.task?.done_at || '').slice(0, 10) === today)), card('f:task:all', '累计完成', doneList)];
+      return [card('f:task:open', '待办', open),
+        card('f:task:review', '待验收', all.filter(n => n.task?.status === 'review')),
+        card('f:task:today', '今日完成', doneList.filter(n => String(n.task?.done_at || '').slice(0, 10) === today)),
+        card('f:task:all', '累计完成', doneList),
+        card('f:task:cmd', '指令台账', cmds)];
     }
     if (zone === '待办') return all.filter(n => n.task?.status !== 'done')
       .sort((a, b) => String(b.task?.updated_at || '').localeCompare(String(a.task?.updated_at || '')));
+    if (zone === '待验收') return all.filter(n => n.task?.status === 'review')
+      .sort((a, b) => String(b.task?.updated_at || '').localeCompare(String(a.task?.updated_at || '')));
+    if (zone === '指令台账') return [...cmds].sort((a, b) => String(b.command?.created_at || '').localeCompare(String(a.command?.created_at || '')));
     if (zone === '今日完成') return doneList.filter(n => String(n.task?.done_at || '').slice(0, 10) === today).sort(byDone);
     const doneMs = n => Date.parse(String(n.task?.done_at || '').replace(' ', 'T')) || 0;
     if (zone === '累计完成') {
@@ -218,6 +226,11 @@ function itemMeta(n) {
       return meta;
     }
     case 'note': return [['出链', 'Out', d.out], ['反链', 'In', d.back], ['↔', '', d.both]];
+    case 'command': {   // 指令台账卡（10-16 批2）：状态 + 来源 + 相对时间
+      const CMD_ST = {queued: '排队', dispatched: '已派', done: '完成', failed: '失败', pending_confirm: '待确认'};
+      const rel = String(n.command?.updated_at || n.command?.created_at || '').slice(5, 16);
+      return [[CMD_ST[n.command?.status] || n.command?.status || '—', '', ''], [n.command?.source || '', '', ''], [rel, '', '']];
+    }
     case 'decision': return [[n.decision?.status || '—', '', ''], [String(n.decision?.created_at || '').slice(5, 10) || '—', '', ''], ['↔', '', d.both]];
     case 'memory': return [[n.updated ? `更新 ${String(n.updated).slice(5)}` : '记忆池', '', ''], ['↔', '', d.both], ['', '', '']];
     case 'service': return [[n.service?.ok ? '在线' : (n.service?.state === 'noreport' ? '无心跳' : '离线'), '', ''], [HB_ZH[n.service?.state] || '', '', ''], ['', '', '']];
@@ -1001,11 +1014,12 @@ function Dock({graph, onGo}) {
   const [cards, setCards] = useState(null);
   const typing = useRef(null);
   const kbCtl = useRef(null);   // 8342 检索串行化：新查询掐掉上一发（kbserve 并发排队会互相污染时序）
-  // 混合查询（批D-4）：本地图谱规则先行出卡，同时异步打 8342 全库语义检索（冷模型 10~30s 常态，
-  // 占位卡先挂"检索中"）——命中后替换为知识库命中卡，KB 文件名能对上图谱节点的直接给可点 chip
+  // 混合查询（10-16 升级三路）：①本地图谱规则卡 ②工作站全域命中卡（任务/拍板/指令/记忆/服务关键词）
+  // ③8342 KB 语义检索（冷模型 10~30s 常态，占位卡先挂"检索中"）——命中后替换，KB 文件名对上图谱节点的给可点 chip
   const ask = text => {
     if (!text.trim()) return;
-    setCards({q: text, list: askGraph(graph, text)});
+    const eco = ecosystemAsk(graph, text);
+    setCards({q: text, list: eco ? [...askGraph(graph, text), eco] : askGraph(graph, text)});
     if (kbCtl.current) kbCtl.current.abort();
     const ctl = kbCtl.current = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 32000);
@@ -1332,6 +1346,8 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
     </nav>}
 
     <div className="stage-tools glass" role="toolbar" aria-label="动画控制">
+      {mod === 'tasks' && <button className="accent" onClick={() => onAction({type: 'addTask'})} title="新建任务进任务池"><Icon name="works" size={15}/><span>＋ 新任务 <em>New task</em></span></button>}
+      {mod === 'decisions' && <button className="accent" onClick={() => onAction({type: 'addDecision'})} title="登记拍板（落账即推微信）"><Icon name="idea" size={15}/><span>＋ 登记拍板 <em>New decision</em></span></button>}
       <button onClick={replay} title="重播开场 Replay"><Icon name="replay" size={15}/><span>重播 <em>Replay</em></span></button>
       <button onClick={() => setPaused(!paused)} title={paused ? '继续 Resume' : '暂停 Pause'} aria-pressed={paused}><Icon name={paused ? 'play' : 'pause'} size={15}/><span>{paused ? '继续' : '暂停'} <em>{paused ? 'Resume' : 'Pause'}</em></span></button>
       <button onClick={onAbout} title="关于图谱 About"><Icon name="info" size={15}/><span>数据来源 <em>Sources</em></span></button>

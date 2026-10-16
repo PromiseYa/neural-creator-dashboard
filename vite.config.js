@@ -1,6 +1,7 @@
 import {defineConfig} from 'vite';
 import fs from 'node:fs';
 import path from 'node:path';
+import {spawn, execFile} from 'node:child_process';
 
 // KB 现场扫描：页面每次请求 /api/kb-graph 时实时读知识库 markdown（正本零写入），
 // 返回标题/分区/标签/双链/摘要。跳过附件区与 brain 构建区。
@@ -236,7 +237,7 @@ function detailPlugin() {
 // 服务舱 8331 卡片改为独立 ping 探测——在线与否仍是事实，但星图数据不再跟着 8331 断。
 const REGISTRY = 'D:/Portable/Documents/工作管理/LoopDeck/workers/registry.json';
 const HB_DEFAULT_IV = 900, HB_GRACE_X = 2.0;
-const TASK_OPEN = ['pending', 'waiting_confirm', 'dispatched', 'doing'];
+const TASK_OPEN = ['pending', 'waiting_confirm', 'dispatched', 'doing', 'review'];  // 10-16 +review：待验收队列进星图
 const hbState = (ts, iv) => {   // 心跳行 → ok/late/down 三态（只认数字 epoch，与 store._hb_state 同口径）
   const age = Date.now() / 1000 - Number(ts);
   if (!Number.isFinite(age)) return 'unknown';
@@ -259,9 +260,12 @@ function entitiesPlugin() {
           const db = new DatabaseSync(HUB_DB, {readOnly: true});
           try {
             const open = db.prepare(`SELECT id,title,status,priority,due,source,attachments,created_at,updated_at FROM tasks
-                                     WHERE status IN (?,?,?,?) ORDER BY updated_at DESC`).all(...TASK_OPEN);
+                                     WHERE status IN (?,?,?,?,?) ORDER BY updated_at DESC`).all(...TASK_OPEN);
             const doneToday = db.prepare(`SELECT id,title,done_at FROM tasks WHERE status='done'
                                           AND date(done_at)=date('now','localtime') ORDER BY done_at DESC`).all();
+            // 指令台账 M-xxx（10-16 批2：星图任务流钻取层"指令台账"卡数据源，未软删的最近 60 条）
+            const commands = db.prepare(`SELECT id,prompt,source,status,task_id,rerun_of,created_at,updated_at
+                                         FROM commands WHERE is_deleted=0 ORDER BY id DESC LIMIT 60`).all();
             const decisions = db.prepare(`SELECT id,title,status,created_at,options FROM decisions
                                           WHERE status='pending' ORDER BY created_at`).all();
             for (const r of decisions) r.options = parseOpts(r.options);
@@ -282,15 +286,16 @@ function entitiesPlugin() {
                 retired: !!w.retired, hb_ts: hb?.ts ?? null,
                 hb_state: hb ? hbState(hb.ts, iv) : 'noreport'};
             });
-            const openTasks = db.prepare(`SELECT count(*) c FROM tasks WHERE status IN (?,?,?,?)`).get(...TASK_OPEN).c;
+            const openTasks = db.prepare(`SELECT count(*) c FROM tasks WHERE status IN (?,?,?,?,?)`).get(...TASK_OPEN).c;
+            const reviewN = db.prepare(`SELECT count(*) c FROM tasks WHERE status='review'`).get().c;
             const pendDec = db.prepare(`SELECT count(*) c FROM decisions WHERE status='pending'`).get().c;
             const actAlarms = db.prepare(`SELECT count(*) c FROM alarms WHERE status='active'`).get().c;
             const maxEv = db.prepare('SELECT coalesce(max(id),0) m FROM events').get().m;
             const hbs = workers.filter(w => !w.retired).map(w => w.hb_state);
             json(200, {ok: true, data: {
               tasks: {open, done_today: doneToday},
-              decisions, workers, events,
-              vitals: {open_tasks: openTasks, pending_decisions: pendDec, active_alarms: actAlarms,
+              commands, decisions, workers, events,
+              vitals: {open_tasks: openTasks, pending_decisions: pendDec, review_tasks: reviewN, active_alarms: actAlarms,
                 workers_ok: hbs.filter(s => s === 'ok').length,
                 workers_late: hbs.filter(s => s === 'late').length,
                 workers_down: hbs.filter(s => s === 'down' || s === 'noreport').length,
@@ -305,18 +310,101 @@ function entitiesPlugin() {
   };
 }
 
+// ecosystemPlugin（批3 生态体检数据源，全只读）：/api/now-md 直读 brain/NOW.md 在办热状态；
+// /api/schedule = Windows 计划任务清单（PowerShell UTF-8 输出，5 分钟缓存）+ LoopDeck recurring.json AI 定时。
+const NOW_MD = 'D:/Portable/KnowledgeBase/brain/NOW.md';
+const RECURRING = 'D:/Portable/Documents/工作管理/LoopDeck/tasks/recurring.json';
+function ecosystemPlugin() {
+  return {
+    name: 'eco-check',
+    configureServer(server) {
+      const json = (res, code, obj) => { res.statusCode = code; res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify(obj)); };
+      server.middlewares.use('/api/now-md', (req, res) => {
+        try { json(res, 200, {ok: true, raw: fs.readFileSync(NOW_MD, 'utf8')}); }
+        catch (e) { json(res, 200, {ok: false, err: String(e && e.message || e)}); }
+      });
+      let cache = null, cacheAt = 0;
+      const loadSchedule = () => new Promise(resolve => {
+        const ps = `[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-ScheduledTask | Where-Object {$_.State -ne 'Disabled'} | ForEach-Object { $i = $_ | Get-ScheduledTaskInfo; '{0}|{1}|{2}' -f $_.TaskName, $_.State, ([string]$i.NextRunTime) }`;
+        execFile('powershell', ['-NoProfile', '-Command', ps], {timeout: 25000, maxBuffer: 4 * 1024 * 1024, windowsHide: true}, (err, out) => {
+          const tasks = [];
+          if (!err) for (const line of String(out).split(/\r?\n/)) {
+            const [name, state, next] = line.split('|');
+            if (name && name.trim()) tasks.push({name: name.trim(), state: (state || '').trim(), next: (next || '').trim()});
+          }
+          let recurring = [];
+          try {
+            const r = JSON.parse(fs.readFileSync(RECURRING, 'utf8')).tasks || {};
+            recurring = Object.entries(r).map(([key, v]) => ({key, enabled: !!v.enabled, prompt: String(v.prompt || '').slice(0, 60)}));
+          } catch {}
+          resolve({ok: !err, tasks: tasks.sort((a, b) => a.name.localeCompare(b.name)), recurring, err: err ? String(err.message || err) : null});
+        });
+      });
+      server.middlewares.use('/api/schedule', async (req, res) => {
+        if (cache && Date.now() - cacheAt < 300000) return json(res, 200, cache);
+        cache = await loadSchedule(); cacheAt = Date.now();
+        json(res, 200, cache);
+      });
+    }
+  };
+}
+
 // base 用相对路径，构建产物可以直接部署在任意子路径。
 // server.proxy：把本机三个现役服务挂成同源路径，页面零跨域直连：
-//   /hub/*   → 8331 工作站底座（星图数据已脱钩直读 hub.db；代理仅剩服务舱在线探测 /api/ping）
-//   /panel/* → 8330 老面板（写操作走这里）
+//   /hub/*   → 8331 引擎宿主（星图数据已脱钩直读 hub.db；代理供服务舱探测/任务详情/附件）
+//   /panel/* → 8331 引擎宿主（写操作走这里，2026-10-16 起 8330 退役）
 //   /kb/*    → 8342 检索服务（语义/关键词混合查询）
+
+// enginePlugin：vite 起服务时拉起工作站引擎宿主（web/server.py --engines）作子进程并全程看护。
+// 2026-10-16 拍板：引擎并 :5173——保活链 StarMap-keep(2min)→vite→本子进程；子进程持 hub 单例锁，
+// 双开后起者自动退出（无双引擎）；面板随进程自带 :8331=备用 UI。仅 dev server 生效（build 不拉引擎）。
+const ENGINE_DIR = 'D:/Portable/Documents/工作管理/LoopDeck/web';
+const ENGINE_PY = ['C:/Users/ocean.xu/AppData/Local/Programs/Python/Python312/pythonw.exe',
+                   'D:/Portable/python312/pythonw.exe'];
+
+function enginePlugin() {
+  return {
+    name: 'loopdeck-engine-sidecar',
+    apply: 'serve',
+    configureServer(server) {
+      const py = ENGINE_PY.find(p => fs.existsSync(p));
+      if (!py) { console.error('[engine] pythonw 不存在，引擎未启动'); return; }
+      const out = fs.openSync(path.join(ENGINE_DIR, 'server_stdout.log'), 'a');
+      const err = fs.openSync(path.join(ENGINE_DIR, 'server_stderr.log'), 'a');
+      let child = null, lastStart = 0, stopped = false;
+      const start = () => {
+        lastStart = Date.now();
+        child = spawn(py, ['-X', 'utf8', path.join(ENGINE_DIR, 'server.py'), '--engines'], {
+          cwd: ENGINE_DIR, stdio: ['ignore', out, err], windowsHide: true,
+          env: Object.assign({}, process.env, {PYTHONUNBUFFERED: '1'})
+        });
+        child.on('exit', code => console.log(`[engine] sidecar 退出 code=${code}`));
+        console.log(`[engine] sidecar 已拉起 pid=${child.pid}`);
+      };
+      start();
+      const timer = setInterval(() => {          // 看护：子进程死了 ≥60s 后重拉，防崩溃环
+        if (stopped || (child && child.exitCode === null)) return;
+        if (Date.now() - lastStart < 60000) return;
+        start();
+      }, 30000);
+      const stop = () => {
+        stopped = true;
+        clearInterval(timer);
+        if (child && child.exitCode === null) { try { child.kill(); } catch (e) {} }
+      };
+      server.httpServer.on('close', stop);
+      process.on('exit', stop);
+    }
+  };
+}
+
 export default defineConfig({
   base: './',
-  plugins: [kbGraphPlugin(), memoryStatePlugin(), detailPlugin(), entitiesPlugin()],
+  plugins: [kbGraphPlugin(), memoryStatePlugin(), detailPlugin(), entitiesPlugin(), ecosystemPlugin(), enginePlugin()],
   server: {
     proxy: {
       '/hub': {target: 'http://127.0.0.1:8331', changeOrigin: true, rewrite: p => p.replace(/^\/hub/, '')},
-      '/panel': {target: 'http://127.0.0.1:8330', changeOrigin: true, rewrite: p => p.replace(/^\/panel/, '')},
+      '/panel': {target: 'http://127.0.0.1:8331', changeOrigin: true, rewrite: p => p.replace(/^\/panel/, '')},
       '/kb': {target: 'http://127.0.0.1:8342', changeOrigin: true, rewrite: p => p.replace(/^\/kb/, '')}
     }
   }

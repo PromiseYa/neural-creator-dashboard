@@ -26,6 +26,7 @@ export function nodeBadge(n) {
   }
   if (n.kind === 'decision') return n.decision?.status === 'pending' ? {text: '待拍', color: '#e8c48c'} : {text: '已结', color: '#7ddc9a'};
   if (n.kind === 'memory') return n.updated ? {text: String(n.updated).slice(5), color: '#98a6a1'} : null;
+  if (n.kind === 'command') { const s = n.command?.status; return {text: {queued: '排队', dispatched: '已派', done: '完成', failed: '失败', pending_confirm: '待确认'}[s] || s || '—', color: s === 'done' ? '#8fa396' : s === 'failed' ? '#ff7385' : '#7ddc9a'}; }
   return null;
 }
 
@@ -42,7 +43,8 @@ export const KINDS = {
   task: {label: '任务', en: 'Task', color: T.kinds.task},
   decision: {label: '拍板', en: 'Decision', color: T.kinds.decision},
   memory: {label: '记忆', en: 'Memory', color: T.kinds.memory},
-  service: {label: '服务', en: 'Service', color: T.kinds.service}
+  service: {label: '服务', en: 'Service', color: T.kinds.service},
+  command: {label: '指令', en: 'Command', color: '#7ddc9a'}
 };
 export const LINK_KINDS = {
   contain: '目录归属',
@@ -71,11 +73,12 @@ export const MODULES = [
   {id: 'memory', title: '记忆池', en: 'Memory', kind: 'memory', folder: 'f:memory', angle: 145, icon: 'draft'},
   {id: 'services', title: '服务舱', en: 'Services', kind: 'service', folder: 'f:services', angle: -90, icon: 'concept'}
 ];
-export const moduleOf = node => MODULES.find(m => m.kind === node?.kind) || null;
+export const moduleOf = node => MODULES.find(m => m.kind === node?.kind)
+  || (node?.kind === 'command' ? MODULES.find(m => m.id === 'tasks') : null);   // 指令 M-xxx 归任务流域（10-16 批2）
 
 export const cleanTitle = t => String(t || '').replace(/^\d+[A-Z]?-☑️/, '').replace(/^\d+-/, '').replace(/_/g, ' · ');
 
-export function buildGraph({tasks = [], decisions = [], memories = [], services = [], notes = []} = {}) {
+export function buildGraph({tasks = [], decisions = [], memories = [], services = [], notes = [], commands = []} = {}) {
   const nodes = new Map();
   const add = n => { if (!nodes.has(n.id)) nodes.set(n.id, {tags: [], text: '', ...n}); return nodes.get(n.id); };
   const edges = new Map();
@@ -133,6 +136,15 @@ export function buildGraph({tasks = [], decisions = [], memories = [], services 
     const id = 'svc:' + s.id;
     add({id, kind: 'service', title: s.name, short: s.name, path: `服务舱/${s.id}`, folder: 'f:services', text: `${s.name} ${s.desc || ''}`, service: s});
     link('f:services', id, 'contain');
+  }
+
+  // 指令台账 M-xxx（10-16 批2）：归任务流锚点方向，不参与力导向迭代（同 done 任务处理，防 O(N²) 膨胀）
+  for (const cm of commands) {
+    const id = 'cmd:' + cm.id;
+    const brief = String(cm.prompt || '').replace(/\s+/g, ' ').trim();
+    add({id, kind: 'command', title: `${cm.id} ${brief.slice(0, 20)}`, short: brief.length > 22 ? brief.slice(0, 22) + '…' : (brief || cm.id),
+      path: `指令台账/${cm.id}`, folder: 'f:tasks', text: `${cm.id} ${brief} ${cm.status || ''} ${cm.source || ''}`, command: cm, date: cm.updated_at});
+    link('f:tasks', id, 'contain');
   }
 
   // [[双链]]：优先用扫描时预抽取的链接清单，正文现场匹配兜底；找不到目标记为「未创建」。
@@ -238,8 +250,8 @@ const rad = d => d * Math.PI / 180;
 
 export function forceLayout(graph) {
   const all = graph.nodes, idx = graph.index;
-  // 已完成任务不参与力导向迭代（累计几百条会把 O(N²) 迭代拖到秒级），直接按锚点随机摆放
-  const N = all.filter(n => !(n.kind === 'task' && n.task?.status === 'done'));
+  // 已完成任务与指令台账不参与力导向迭代（累计几百条会把 O(N²) 迭代拖到秒级），直接按锚点随机摆放
+  const N = all.filter(n => !(n.kind === 'task' && n.task?.status === 'done') && n.kind !== 'command');
   const anchor = id => {
     const n = idx.get(id);
     if (n.kind === 'concept') return [0, -1];
@@ -377,4 +389,29 @@ export function askGraph(graph, question, scope) {
   }
   if (scope) cards.forEach(c => { if (c.items) c.items.sort((a, b) => (b === scope) - (a === scope)); });
   return cards.map(c => ({...c, names: (c.items || []).map(name)}));
+}
+
+// 工作站混合命中卡（10-16 混合查询）：任务/拍板/指令/记忆/服务全域关键词匹配——
+// 与 askGraph 规则卡、8342 KB 语义卡并列，查询框一次问出整个生态。
+export function ecosystemAsk(graph, question) {
+  const q = String(question || '').trim();
+  if (!q) return null;
+  const words = q.replace(/[？?。，,！!]/g, ' ').split(/\s+/).filter(w => w.length >= 1).map(w => w.toLowerCase());
+  if (!words.length) return null;
+  const KIND_ZH = {task: '任务', decision: '拍板', command: '指令', memory: '记忆', service: '服务'};
+  const hits = graph.nodes.filter(n => n.kind in KIND_ZH && (n.task?.status !== 'done')).map(n => {
+    const hay = (n.title + ' ' + (n.text || '')).toLowerCase();
+    let score = 0;
+    for (const w of words) score += n.title.toLowerCase().includes(w) ? 3 : hay.includes(w) ? 1 : 0;
+    return {n, score};
+  }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 10);
+  if (!hits.length) return null;
+  const byKind = {};
+  for (const h of hits) byKind[h.n.kind] = (byKind[h.n.kind] || 0) + 1;
+  return {
+    tone: 'gold', title: `工作站命中 ${hits.length} 条`, en: 'Workstation hits',
+    text: Object.entries(byKind).map(([k, v]) => `${KIND_ZH[k]} ${v}`).join(' · '),
+    items: hits.map(h => h.n.id), names: hits.map(h => h.n.short || h.n.title),
+    meta: hits.map(h => KIND_ZH[h.n.kind])
+  };
 }
