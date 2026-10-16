@@ -249,6 +249,23 @@ function ReviewRejectModal({id, onClose, onDone}) {
   </Modal>;
 }
 
+// 页面级错误边界（10-14 审查短板②，10-16 壁纸黑屏案后补上）：任何组件崩溃只显示错误卡+重载按钮，
+// 不再整树卸载把壁纸/页面变黑屏（ReferenceError: useRef 案=点附件图全屏黑，root 直接清空）。
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = {err: null}; }
+  static getDerivedStateFromError(err) { return {err}; }
+  componentDidCatch(err) { try { console.error('[ErrorBoundary]', err); } catch {} }
+  render() {
+    if (!this.state.err) return this.props.children;
+    return <div className="eb-fallback" role="alert">
+      <h2>页面出了个错 <em>Something broke</em></h2>
+      <p>{String(this.state.err?.message || this.state.err)}</p>
+      <button className="pill primary" onClick={() => location.reload()}>刷新页面 <em>Reload</em></button>
+      <p className="quiet">错误已拦下没有黑屏；若反复出现请带着上面这行报错找 AI。</p>
+    </div>;
+  }
+}
+
 function App() {
   // URL 定位参数 ?mod=tasks&zone=累计完成：可分享/可书签直达某层（也供无头截图验证壁纸端真实渲染）
   const [focus, setFocus] = useState(() => {
@@ -441,7 +458,7 @@ function App() {
   </div>;
 }
 
-createRoot(document.getElementById('root')).render(<App/>);
+createRoot(document.getElementById('root')).render(<ErrorBoundary><App/></ErrorBoundary>);
 
 // 壁纸模式标记（WebView2 宿主里才存在 chrome.webview）：底部元素避让任务栏区，
 // 浏览器窗口模式无任务栏遮挡不受影响

@@ -729,3 +729,8 @@ button.chip:hover { background: color-mix(in srgb, var(--kc, #9db3af) 22%, trans
 .eco-sub { font-size: 11.5px; color: var(--text-2); margin: 8px 0 5px; }
 .eco-now { margin: 0; padding: 10px 12px; background: rgba(255, 255, 255, .03); border: 1px solid var(--line-2);
   border-radius: 10px; font-size: 12px; line-height: 1.75; color: var(--text); white-space: pre-wrap; font-family: inherit; max-height: 200px; overflow-y: auto; }
+
+.eb-fallback { position: fixed; inset: 0; z-index: 200; display: grid; place-content: center; justify-items: center; gap: 12px;
+  background: radial-gradient(1200px 700px at 50% 40%, #10161d, #07090c); color: var(--text); text-align: center; padding: 40px; }
+.eb-fallback h2 { font-size: 18px; }
+.eb-fallback p { font-size: 12.5px; color: var(--text-2); max-width: 560px; word-break: break-all; }

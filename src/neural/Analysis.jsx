@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {KINDS, CONTENT, MODULES, neighbors, latent, askGraph, ecosystemAsk, LINK_KINDS, LINK_EN, STATUS_ZH, PRIO_ZH} from './graph';
 import {Icon} from './icons';
 import {stripFrontmatter, firstImage} from './markdown';
