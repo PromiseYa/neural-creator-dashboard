@@ -265,7 +265,8 @@ export function targets(L, t) {
       }
       return {rm, bx: base[i].x, by: base[i].y};
     });
-    js.forEach(({rm, bx, by}) => {   // 边界反弹（按绝对位置）
+    js.forEach(({rm, bx, by}) => {   // 边界反弹（按绝对位置）；吸附态跳过（坐标已实时写回跟随点，屏幕边在显示层软拦）
+      if (rm.att) return;
       const ax = bx + rm.x, ay = by + rm.y;
       if (ax < 100) { rm.x = 100 - bx; rm.vx = Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
       if (ax > W - 100) { rm.x = W - 100 - bx; rm.vx = -Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
@@ -275,6 +276,7 @@ export function targets(L, t) {
     for (let i = 0; i < js.length; i++) for (let k = i + 1; k < js.length; k++) {   // 成对相撞：互换法向速度+位置各退一半重叠
       const A = js[i], B = js[k];
       if (t < (A.rm.noHit || 0) || t < (B.rm.noHit || 0)) continue;   // 免疫期（刚脱钩的惯性飘逸不被立刻再弹）
+      if (A.rm.att || B.rm.att) continue;   // 吸附态不参与碰撞（拖动零碰撞）
       const dx = (A.bx + A.rm.x) - (B.bx + B.rm.x), dy = (A.by + A.rm.y) - (B.by + B.rm.y);
       const d = Math.hypot(dx, dy), minD = 128;
       if (d > 0.01 && d < minD) {
@@ -297,6 +299,7 @@ export function targets(L, t) {
     const abs = js.map(({rm, bx, by}) => [bx + rm.x, by + rm.y]);
     for (let i = 0; i < js.length; i++) {
       const rm = js[i].rm;
+      if (rm.att) continue;   // 吸附态零碰撞（十三轮令的显式化：坐标实时写回后防推挤与跟随点打架）
       if (t < (rm.noHit || 0)) continue;   // 免疫期：脱钩后的惯性飘逸期跳过走廊反弹（防连环弹=抖动）
       for (let k = 0; k < js.length; k++) {
         if (k === i) continue;
@@ -315,7 +318,7 @@ export function targets(L, t) {
     }
     // 光球本体也是实体（用户令八轮）：水母压进光球光域=沿径向弹出+速度反射，与走廊同款最小反弹
     js.forEach(({rm, bx, by}) => {
-      if (t < (rm.noHit || 0)) return;
+      if (rm.att || t < (rm.noHit || 0)) return;   // 吸附态零碰撞
       const ax2 = bx + rm.x, ay2 = by + rm.y;
       const dx = ax2 - ocx, dy = ay2 - ocy, d = Math.hypot(dx, dy), minD = res.orb.s * .38 + jsz * .28;
       if (d > .01 && d < minD) {
@@ -349,6 +352,10 @@ export function targets(L, t) {
       if (L.smx != null) {
         const adx = L.smx - jj.x, ady = L.smy - jj.y, add = Math.hypot(adx, ady);
         if (!rm.att && add < jj.s * .5 && m.id === attCandidate && t >= (rm.noPull || 0)) { rm.att = true; rm.ax = null; rm.ay = null; }
+        if (rm.att && Math.hypot(L.smx - (rm.ax ?? jj.x), L.smy - (rm.ay ?? jj.y)) > 300) {
+          // 幽灵吸附保护：切视图/长时间断流后跟随点已远离鼠标=就地安静脱钩（吸附位置实时写回，不会跳变）
+          rm.att = false; rm.ax = null; rm.ay = null; rm.noPull = t + 1.5;
+        }
         if (rm.att) {
           const detach = (nx, ny) => {   // 脱钩：位置写回漫游坐标；反弹=给定法线初速，甩脱=拖动惯性延续（卸力飘逸）
             rm.att = false; rm.ax = null; rm.ay = null;
@@ -380,9 +387,10 @@ export function targets(L, t) {
             const PAD = 60;
             if (jj.x < PAD) jj.x = PAD; else if (jj.x > W - PAD) jj.x = W - PAD;
             if (jj.y < PAD - 10) jj.y = PAD - 10; else if (jj.y > H - PAD + 10) jj.y = H - PAD + 10;
+            rm.x = jj.x - bx; rm.y = jj.y - by;   // 吸附位置实时写回漫游坐标：断流/切视图等任何脱钩路径不再跳回吸附前旧位置（拖开后回挡路原位的真根）
           }
         } else if (add < 150 && add > 2 && t >= (rm.noPull || 0)) { const u = 1 - add / 150; const f = Math.pow(u, 1.8) * 60; jj.x += adx / add * f; jj.y += ady / add * f; jj.s *= 1 - u * .2; jj.pull = u; }
-      } else rm.att = false;
+      } else if (rm.att) { rm.att = false; rm.ax = null; rm.ay = null; rm.noPull = t + 1.5; }   // 鼠标断流：就地安静脱钩（位置已实时同步，不跳回）
       jj.tilt = clamp(jj.tilt, -26, 26);
       res.jelly[m.id] = jj;
     });
