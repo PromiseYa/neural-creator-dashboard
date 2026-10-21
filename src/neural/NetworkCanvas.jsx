@@ -77,8 +77,11 @@ export function NetworkCanvas({graph, layout, live, reduced}) {
       const t = Math.max(0, (now - L.t0) / 1000);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      const cx = L.orb.x, cy = L.orb.y;
-      const sc = (L.orb.s / 440) * Math.min(W * .37 / 380, H * .36 / 300) * (L.stage === 'hub' ? 1 : .55);
+      // 相机投影（星图 10-21 无限画布）：光球在世界原点，星云作为世界内容随相机平移/缩放——
+      // 屏幕位置=屏幕中心+(世界-相机)×z，缩放系数同步乘 z（拉远星云收拢、拉近散开，与内容环同一景深）
+      const cam = L.camView || {x: L.orb.x, y: L.orb.y, z: 1};
+      const cx = W / 2 + (L.orb.x - cam.x) * cam.z, cy = H / 2 + (L.orb.y - cam.y) * cam.z;
+      const sc = (L.orb.s / 440) * Math.min(W * .37 / 380, H * .36 / 300) * (L.stage === 'hub' ? 1 : .55) * cam.z;
       const hover = L.hover;
       if (hover !== hlKey) {
         hlKey = hover;
