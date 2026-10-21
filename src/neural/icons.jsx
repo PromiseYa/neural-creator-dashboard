@@ -29,7 +29,9 @@ const paths = {
   user: 'M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z',
   pulse: 'M3 12h4l2-6 4 12 2-6h6',
   grid: 'M4 4h7v7H4ZM13 4h7v7h-7ZM4 13h7v7H4ZM13 13h7v7h-7Z',
-  file: 'M6 3h8l4 4v14H6ZM14 3v5h4'
+  file: 'M6 3h8l4 4v14H6ZM14 3v5h4',
+  copy: 'M9 9h10v12H9ZM5 15V3h10',
+  bell: 'M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6ZM10 20a2 2 0 0 0 4 0'
 };
 
 export function Icon({name, size = 18, ...props}) {

@@ -96,16 +96,35 @@ const core = [
   ['光球视频', /className="orb[^"]*"[\s\S]{0,400}<video [^>]*src=\{T\.media\.orb\}/],
   ['光球周围的光点', /orb-dust/],
   ['每个模块一只水母视频', /MODULES\.map\(m => \{[\s\S]{0,600}className=\{`jelly [\s\S]{0,600}<video [^>]*src=\{T\.media\.jelly\}/],
-  ['视频逐帧画到画布显示（兼容不合成 <video> 的内置浏览器）', /function paintVideo\(pair\)[\s\S]*drawImage[\s\S]*for \(const pair of Object\.values\(vids\.current\)\) paintVideo\(pair\)/],
+  ['video painted to canvas for embedded browsers', /function paintVideo\(pair(?:, sway)?\)[\s\S]*drawImage[\s\S]*for \(const \[(?:vid, )?pair\] of Object\.(?:entries|values)\(vids\.current\)\)[\s\S]*paintVideo\(pair/],
   ['光球与水母的逐帧动画', /const step = now => \{[\s\S]*orbRef\.current\.style\.transform[\s\S]*el\.style\.transform/],
   ['动画循环防中断（先排下一帧、出错不停）', /const frame = now => \{ raf = requestAnimationFrame\(frame\); try \{ step\(now\); \}/],
   ['时间差不为负', /const dt = Math\.max\(0,/]
 ];
 for (const [label, re] of core) if (!re.test(home)) fail(`Home.jsx 缺少核心动效：${label}`); else ok(label);
-const modules = (graphSrc.match(/export const MODULES = \[([\s\S]*?)\n\];/) || [])[1] || '';
-if ((modules.match(/\{id: '/g) || []).length !== 5) fail('graph.js 的 MODULES 应为 5 个模块（5 只水母）');
-else ok('5 个模块 → 5 只水母');
+const platformSrc = readFileSync(join(ROOT, 'src/platform/modules.js'), 'utf8');
+const modules = (platformSrc.match(/export const PLATFORM_MODULES = \[([\s\S]*?)\n\];/) || [])[1] || '';
+if ((modules.match(/\{id: '/g) || []).length !== 5) fail('MODULES must contain 5 modules');
+else ok('5 modules -> 5 jellyfish');
 for (const f of ['media/orb.mp4', 'media/jellyfish.mp4']) if (!existsSync(join(ROOT, 'public', f))) fail(`缺少核心素材 public/${f}`);
+
+// 5. Platform modular architecture
+console.log('Platform modules');
+const connectorDir = join(ROOT, 'src/platform/connectors');
+for (const id of ['tasks', 'knowledge', 'decisions', 'memory', 'services']) {
+  const f = join(connectorDir, id + '.js');
+  if (!existsSync(f)) fail(`missing connector: ${id}`);
+}
+if (platformSrc.includes('???')) fail('src/platform/modules.js contains mojibake');
+const mainSrc = readFileSync(join(ROOT, 'src/neural/main.jsx'), 'utf8');
+const viteSrc = readFileSync(join(ROOT, 'vite.config.js'), 'utf8');
+// 星图 10-18：顶栏 module-nav 导航已按用户令撤下（模块入口=水母本体），断言改为新接线——
+// 阅读全文栈式跳转（openRead）与到期提醒闹钟通道（alarm_add）是本轮关键链路
+for (const token of ['PLATFORM_MODULES', 'usePlatform', 'openRead', 'alarm_add']) if (!mainSrc.includes(token)) fail(`main.jsx missing platform token: ${token}`);
+for (const route of ['/api/platform/tasks', '/api/platform/decisions', '/api/platform/services', '/api/platform/vitals']) if (!viteSrc.includes(route)) fail(`vite.config.js missing route: ${route}`);
+for (const route of ['/api/platform/actions/task', '/api/platform/actions/decide', '/api/platform/kb-search']) if (!viteSrc.includes(route)) fail(`vite.config.js missing proxy: ${route}`);
+if (viteSrc.includes("'/hub':") || viteSrc.includes("'/panel':") || viteSrc.includes("'/kb':")) fail('legacy direct service proxies should not be exposed to UI');
+ok('module registry, connectors, pages and scoped APIs are wired');
 
 // 4. 页面与素材
 console.log('页面与素材');

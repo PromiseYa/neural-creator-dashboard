@@ -1,6 +1,7 @@
 // 神经图谱数据：任务/拍板/记忆/服务来自工作站实时接口，知识库笔记来自本地现场扫描。
 // 连接来源：笔记正文 [[双链]]、目录归属、话题标签（KB 标签自动聚类，概念词表已废弃）。
 import {CONFIG} from '../config';
+import {PLATFORM_MODULES} from '../platform/modules';
 import {T} from './theme';
 
 export const STATUS_ZH = {pending: '待办', dispatched: '已派', doing: '进行中', waiting_confirm: '待确认', review: '待复核', done: '完成'};
@@ -65,14 +66,8 @@ const FOLDERS = [
   {id: 'f:services', title: '服务舱', path: 'services', angle: -90}
 ];
 
-// 首页围绕光球的五个模块；角度与图谱布局的目录锚点一致，背景网络会朝各自模块蔓延。
-export const MODULES = [
-  {id: 'tasks', title: '任务流', en: 'Tasks', kind: 'task', folder: 'f:tasks', angle: 180, icon: 'works'},
-  {id: 'kb', title: '知识库', en: 'Knowledge', kind: 'note', folder: 'f:kb', angle: 0, icon: 'methods'},
-  {id: 'decisions', title: '拍板台', en: 'Decisions', kind: 'decision', folder: 'f:decisions', angle: 35, icon: 'idea'},
-  {id: 'memory', title: '记忆池', en: 'Memory', kind: 'memory', folder: 'f:memory', angle: 145, icon: 'draft'},
-  {id: 'services', title: '服务舱', en: 'Services', kind: 'service', folder: 'f:services', angle: -90, icon: 'concept'}
-];
+// Platform modules are shared by jellyfish, navigation pages and graph anchors.
+export const MODULES = PLATFORM_MODULES;
 export const moduleOf = node => MODULES.find(m => m.kind === node?.kind)
   || (node?.kind === 'command' ? MODULES.find(m => m.id === 'tasks') : null);   // 指令 M-xxx 归任务流域（10-16 批2）
 
@@ -414,4 +409,32 @@ export function ecosystemAsk(graph, question) {
     items: hits.map(h => h.n.id), names: hits.map(h => h.n.short || h.n.title),
     meta: hits.map(h => KIND_ZH[h.n.kind])
   };
+}
+
+// kbserve 命中 → 统一可点击 items（匹配图谱节点的走 onGo 跳转，未匹配的走 readKb 阅读弹窗）
+// 2026-10-21 修复：微信转写文件 basename=日期（如 2026-10-14.md），群名在父目录——
+// 旧逻辑 chip 全是"2026-10-14"千篇一律；现在拼父目录短名，并带 chunk 摘要片段，
+// 卡片不用点开就能判断沾不沾边。
+export function kbHitsToItems(hits, graph) {
+  const base = p => String(p || '').split(/[\\/]/).pop().replace(/\.md$/, '');
+  const shortParent = path => {
+    const parts = String(path || '').replace(/\\/g, '/').split('/').filter(Boolean);
+    return parts.length >= 2 ? parts[parts.length - 2] : '';
+  };
+  const looksLikeDate = s => /^\d{4}-\d{2}-\d{2}/.test(s || '');
+  return (hits || []).map(h => {
+    const path = h.meta?.source_path || '';
+    const b = base(path);
+    const nd = b && graph.nodes.find(n => n.kind === 'note' && base(n.path) === b);
+    const sim = h.cosine != null ? Number(h.cosine).toFixed(2) : (h.src?.includes('bm25') ? '关键词' : '相关');
+    const meta = typeof sim === 'string' ? sim : '相似 ' + sim;
+    if (nd) return {id: nd.id, name: nd.short || nd.title, meta, isKb: false, kind: nd.kind};
+    // 日期型文件名拼父目录（群名/邮件夹名），否则只留 basename；过长父名截 14 字
+    const parent = shortParent(path);
+    const name = (looksLikeDate(b) && parent)
+      ? `${b}·${parent.length > 14 ? parent.slice(0, 14) + '…' : parent}`
+      : (b || '命中');
+    const snippet = String(h.doc || '').replace(/\s+/g, ' ').trim().slice(0, 90);
+    return {id: 'kb:' + path, name, meta, isKb: true, kind: 'note', path, doc: h.doc || '', snippet, cat: h.meta?.category || ''};
+  });
 }

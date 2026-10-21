@@ -165,10 +165,36 @@ function memoryStatePlugin() {
 const HUB_DB = 'D:/Portable/Documents/工作管理/LoopDeck/hub/hub.db';
 const IMG_MIME = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.avif': 'image/avif'};
 const kbRootAbs = path.resolve(KB_ROOT).toLowerCase();
+// 2026-10-21 修复：kbserve 索引的语料不全在 Obsidian 仓库下——微信/邮件/工作管理/专案文档都在外面，
+// readKb 命中后点击全文被 insideKB 一刀切挡成 400（前端误报"全文读取失败/引擎宿主不可达"）。
+// 白名单扩到 kbsearch 实际语料根（与 kbsearch/config.py 同源），仍逐根 startsWith + sep 防目录穿越。
+const KB_EXTRA_ROOTS = [
+  'D:/Portable/Documents/工作管理/LoopDeck/workers/kbsearch',  // sources_wechat/mail/office
+  'D:/Project/SEASCN25006/EAP',                                 // 威尔高 spec/参考/设备商
+  'D:/Portable/Documents/工作管理',                             // 中富/恒美/威尔高专案 md
+  'D:/Portable/Documents/EAP相关专案问题整理',
+  'C:/Users/ocean.xu/.zcode/experience',
+  'C:/Users/ocean.xu/.zcode/cli/memories/projects',   // ZCode memory 真身（kbsearch 同样索引）
+  'C:/Users/ocean.xu/Documents/xwechat_files',
+  'D:/Deltabox',
+  'D:/Project/CERTW-002106',
+  'D:/Project/DTANJ-000414',
+].map(r => path.resolve(r).toLowerCase());
 const insideKB = p => {
   if (!p || p.includes('\0')) return null;
-  const full = path.resolve(KB_ROOT, p);
-  return full.toLowerCase().startsWith(kbRootAbs + path.sep) ? full : null;
+  // kbserve 传绝对路径；/api/kb-graph 的 path 是 KB 相对路径，必须相对 KB_ROOT 解析
+  // （不能裸 path.resolve，那会相对 vite cwd=项目目录，导致全部笔记 400）
+  let full = path.isAbsolute(p) ? path.resolve(p) : path.resolve(KB_ROOT, p);
+  // kbserve 索引里 KB 语料的路径是 junction 路径 C:/Users/ocean.xu/KnowledgeBase/...，
+  // realpath 归一到 D:/Portable/KnowledgeBase，否则点击搜索结果仍被白名单挡成 400
+  try { full = fs.realpathSync(full); } catch {}
+  const fl = full.toLowerCase();
+  if (fl === kbRootAbs) return null;
+  if (fl.startsWith(kbRootAbs + path.sep)) return full;
+  for (const r of KB_EXTRA_ROOTS) {
+    if (fl.startsWith(r + path.sep)) return full;
+  }
+  return null;
 };
 const q = req => new URL(req.url, 'http://local').searchParams;
 
@@ -180,10 +206,13 @@ function detailPlugin() {
       server.middlewares.use('/api/note-raw', (req, res) => {
         const id = (q(req).get('id') || '').replace(/\\/g, '/');
         const full = insideKB(id);
-        if (!full || !id.toLowerCase().endsWith('.md')) return json(res, 400, {ok: false});
+        // 10-21：命中语料两成是 .txt（EAP 排错记录/memorycore defer 包/使用说明）——此前非 .md 一律 400，
+        // 前端表现"阅读全文打开失败"；txt 是纯文本，直接放行（docx/pdf 等二进制仍挡，由前端分流提示）
+        const ext = path.extname(id).toLowerCase();
+        if (!full || !['.md', '.txt'].includes(ext)) return json(res, 400, {ok: false});
         try {
           const raw = fs.readFileSync(full, 'utf8');
-          json(res, 200, {ok: true, id, dir: id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : '', raw});
+          json(res, 200, {ok: true, id, ext, dir: id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : '', raw});
         } catch { json(res, 404, {ok: false}); }
       });
       server.middlewares.use('/api/kb-asset', (req, res) => {
@@ -203,7 +232,8 @@ function detailPlugin() {
           const {DatabaseSync} = await import('node:sqlite');
           const db = new DatabaseSync(HUB_DB, {readOnly: true});
           try {
-            const rows = db.prepare("SELECT id,title,done_at,'done' AS status FROM tasks WHERE status='done' ORDER BY done_at DESC").all();
+            const rows = db.prepare("SELECT id,title,done_at,'done' AS status,source,source_ref FROM tasks WHERE status='done' ORDER BY done_at DESC").all();
+            attachSrcInfo(db, rows);
             json(res, 200, {ok: true, rows});
           } finally { db.close(); }
         } catch { json(res, 500, {ok: false}); }
@@ -249,6 +279,25 @@ const parseOpts = raw => {
   try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; }
   catch { return String(raw).split('|').filter(Boolean); }
 };
+// 任务来源行键 → 来源文件实物（星图 10-21 用户令「哪个 Excel 哪个页签」）：
+// source_ref 形如 src{N}:…，N=sources 表 id；给任务行附带 src_name（来源名）、src_sheet（页签）、src_path（文件路径）。
+// 只读直查，纯加字段；/api/entities、/api/platform/tasks、/api/platform/tasks/full、/api/hub-done 共用。
+const attachSrcInfo = (db, rows) => {
+  if (!rows || !rows.length) return rows;
+  let srcs = null;
+  try { srcs = db.prepare('SELECT id,name,path,sheet FROM sources').all(); } catch { return rows; }
+  const byId = new Map((srcs || []).map(s => [s.id, s]));
+  for (const t of rows) {
+    const m = /^src(\d+):/.exec(String(t.source_ref || ''));
+    if (!m) continue;
+    const s = byId.get(parseInt(m[1], 10));
+    if (!s) continue;
+    t.src_name = s.name || null;
+    t.src_sheet = s.sheet || null;
+    t.src_path = s.path || null;
+  }
+  return rows;
+};
 function entitiesPlugin() {
   return {
     name: 'hub-entities',
@@ -259,8 +308,11 @@ function entitiesPlugin() {
           const {DatabaseSync} = await import('node:sqlite');
           const db = new DatabaseSync(HUB_DB, {readOnly: true});
           try {
-            const open = db.prepare(`SELECT id,title,status,priority,due,source,attachments,created_at,updated_at FROM tasks
+            // source_ref（星图 10-20 五轮）：带上任务来源行键，图谱任务节点 → 档案页可按 src{id} 追溯到具体来源文件
+            // 10-21：attachSrcInfo 再附 src_name/src_sheet/src_path——任务卡/详情直接显示「哪个 Excel 哪个页签」
+            const open = db.prepare(`SELECT id,title,status,priority,due,source,source_ref,attachments,created_at,updated_at FROM tasks
                                      WHERE status IN (?,?,?,?,?) ORDER BY updated_at DESC`).all(...TASK_OPEN);
+            attachSrcInfo(db, open);
             const doneToday = db.prepare(`SELECT id,title,done_at FROM tasks WHERE status='done'
                                           AND date(done_at)=date('now','localtime') ORDER BY done_at DESC`).all();
             // 指令台账 M-xxx（10-16 批2：星图任务流钻取层"指令台账"卡数据源，未软删的最近 60 条）
@@ -310,6 +362,122 @@ function entitiesPlugin() {
   };
 }
 
+// platformApiPlugin: module-scoped read APIs. Each page owns its own data slice;
+// a failing connector cannot take down the whole station snapshot.
+function platformApiPlugin() {
+  return {
+    name: 'platform-modules',
+    configureServer(server) {
+      const json = (res, code, obj) => {
+        res.statusCode = code;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify(obj));
+      };
+      const withDb = async (res, fn) => {
+        try {
+          const {DatabaseSync} = await import('node:sqlite');
+          const db = new DatabaseSync(HUB_DB, {readOnly: true});
+          try { json(res, 200, {ok: true, data: fn(db)}); }
+          finally { db.close(); }
+        } catch (e) {
+          json(res, 500, {ok: false, err: String(e && e.message || e)});
+        }
+      };
+      server.middlewares.use('/api/platform/tasks', (req, res, next) => {
+        // 完整 tasks 表（星图 10-20 六轮，用户令「要的是 tasks 表这个东西」）：按需拉取全表（含已完成），
+        // 字段对齐 8331 引擎 overview_counts（schedule.py）——id/title/status/priority/due/source/source_ref/notes/…
+        // connect use(path) 匹配后会把匹配前缀从 req.url 剥掉：/api/platform/tasks/full 在这里是 /full。
+        // 放行给下一个 /full 专属中间件（完整 tasks 表），其余 /api/platform/tasks* 由本中间件处理。
+        if (req.url.startsWith('/full')) return next();
+        withDb(res, db => {
+          // source_ref（星图 10-20 五轮）：带上任务来源行键，档案页「实际数据」可按 src{id} 追溯到具体来源文件
+          // 10-21：attachSrcInfo 附 src_name/src_sheet/src_path——任务卡/详情显示「哪个 Excel 哪个页签」
+          const open = db.prepare(`SELECT id,title,status,priority,due,source,source_ref,attachments,created_at,updated_at FROM tasks
+                                   WHERE status IN (?,?,?,?,?) ORDER BY updated_at DESC`).all(...TASK_OPEN);
+          attachSrcInfo(db, open);
+          const doneToday = db.prepare(`SELECT id,title,done_at FROM tasks WHERE status='done'
+                                        AND date(done_at)=date('now','localtime') ORDER BY done_at DESC`).all();
+          const commands = db.prepare(`SELECT id,prompt,source,status,task_id,rerun_of,created_at,updated_at
+                                       FROM commands WHERE is_deleted=0 ORDER BY id DESC LIMIT 60`).all();
+          const events = db.prepare(`SELECT id,ts,kind,actor,action,detail,task_id FROM events
+                                     ORDER BY id DESC LIMIT 40`).all();
+          return {tasks: {open, done_today: doneToday}, commands, events};
+        });
+      });
+      server.middlewares.use('/api/platform/tasks/full', (req, res) => withDb(res, db => {
+        // 全任务表（含已完成，最近 500 条）：档案页「完整 tasks 表」按需拉一次，不进 30 秒轮询
+        const rows = db.prepare(`SELECT id,title,status,priority,due,source,source_ref,notes,created_at,updated_at,done_at
+                                 FROM tasks ORDER BY updated_at DESC, id DESC LIMIT 500`).all();
+        attachSrcInfo(db, rows);
+        return {tasks: rows};
+      }));
+      server.middlewares.use('/api/platform/decisions', (req, res) => withDb(res, db => {
+        const decisions = db.prepare(`SELECT id,title,status,created_at,options FROM decisions
+                                      WHERE status='pending' ORDER BY created_at`).all();
+        for (const r of decisions) r.options = parseOpts(r.options);
+        return {decisions};
+      }));
+      server.middlewares.use('/api/platform/services', (req, res) => withDb(res, db => {
+        let entries = [];
+        try { entries = JSON.parse(fs.readFileSync(REGISTRY, 'utf8')).workers || []; } catch {}
+        const latest = new Map();
+        for (const r of db.prepare('SELECT name, ts, expected_interval FROM heartbeats').all()) {
+          const old = latest.get(r.name);
+          if (old == null || (r.ts || 0) > (old.ts || 0)) latest.set(r.name, r);
+        }
+        return {workers: entries.map(w => {
+          const hb = latest.get(w.id), iv = hb?.expected_interval || HB_DEFAULT_IV;
+          return {id: w.id, name: w.name, type: w.type, emoji: w.emoji, desc: w.desc, ui: w.ui || null,
+            retired: !!w.retired, hb_ts: hb?.ts ?? null, hb_state: hb ? hbState(hb.ts, iv) : 'noreport'};
+        })};
+      }));
+      server.middlewares.use('/api/platform/vitals', (req, res) => withDb(res, db => {
+        let workers = [];
+        try { workers = JSON.parse(fs.readFileSync(REGISTRY, 'utf8')).workers || []; } catch {}
+        const latest = new Map();
+        for (const r of db.prepare('SELECT name, ts, expected_interval FROM heartbeats').all()) {
+          const old = latest.get(r.name);
+          if (old == null || (r.ts || 0) > (old.ts || 0)) latest.set(r.name, r);
+        }
+        const states = workers.filter(w => !w.retired).map(w => {
+          const hb = latest.get(w.id);
+          return hb ? hbState(hb.ts, hb.expected_interval || HB_DEFAULT_IV) : 'noreport';
+        });
+        return {
+          open_tasks: db.prepare(`SELECT count(*) c FROM tasks WHERE status IN (?,?,?,?,?)`).get(...TASK_OPEN).c,
+          pending_decisions: db.prepare(`SELECT count(*) c FROM decisions WHERE status='pending'`).get().c,
+          review_tasks: db.prepare(`SELECT count(*) c FROM tasks WHERE status='review'`).get().c,
+          active_alarms: db.prepare(`SELECT count(*) c FROM alarms WHERE status='active'`).get().c,
+          workers_ok: states.filter(x => x === 'ok').length,
+          workers_late: states.filter(x => x === 'late').length,
+          workers_down: states.filter(x => x === 'down' || x === 'noreport').length,
+          last_event_id: db.prepare('SELECT coalesce(max(id),0) m FROM events').get().m,
+          ts: Date.now() / 1000
+        };
+      }));
+      // 数据源实物（星图 10-20 用户令「数据来源指向实物」）：sources 表实况 + 文件存在性 +
+      // tfssync 取新状态（变更集/最后成功/待补扫）——任务源头=TFS 工作区 Excel，此处直接给出实物。
+      server.middlewares.use('/api/platform/sources', (req, res, next) => {
+        // 写操作（来源管理：add/set/del/scan）走 /api/platform/sources/action → proxy 到引擎 8331 /api/source；
+        // 本中间件只读，放行该路径避免前缀匹配截胡。
+        if (req.url.startsWith('/api/platform/sources/action')) return next();
+        return withDb(res, db => {
+        const TFSYNC_STATE = 'D:/Portable/Documents/工作管理/LoopDeck/workers/tfssync/state.json';
+        const sources = db.prepare(`SELECT id,name,kind,path,sheet,owner,enabled,last_scan_at,last_count,scan_min,cols,created_at
+                                    FROM sources ORDER BY id`).all();
+        for (const s of sources) { try { s.exists = fs.existsSync(s.path); } catch { s.exists = false; } }
+        // 按来源通道的任务实时计数（10-21）：大白话「任务从哪来」直接显示 每条通道 多少条/未结几条
+        const taskCounts = db.prepare(`SELECT source, COUNT(*) n, SUM(CASE WHEN status != 'done' THEN 1 ELSE 0 END) open
+                                       FROM tasks GROUP BY source ORDER BY n DESC`).all()
+          .map(r => ({source: r.source, n: r.n, open: r.open}));
+        let tfssync = null;
+        try { tfssync = JSON.parse(fs.readFileSync(TFSYNC_STATE, 'utf8')); } catch {}
+        return {sources, taskCounts, tfssync};
+      })});
+    }
+  };
+}
+
 // ecosystemPlugin（批3 生态体检数据源，全只读）：/api/now-md 直读 brain/NOW.md 在办热状态；
 // /api/schedule = Windows 计划任务清单（PowerShell UTF-8 输出，5 分钟缓存）+ LoopDeck recurring.json AI 定时。
 const NOW_MD = 'D:/Portable/KnowledgeBase/brain/NOW.md';
@@ -320,24 +488,43 @@ function ecosystemPlugin() {
     configureServer(server) {
       const json = (res, code, obj) => { res.statusCode = code; res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify(obj)); };
       server.middlewares.use('/api/now-md', (req, res) => {
-        try { json(res, 200, {ok: true, raw: fs.readFileSync(NOW_MD, 'utf8')}); }
+        try {
+          const raw = fs.readFileSync(NOW_MD, 'utf8');
+          const mt = fs.statSync(NOW_MD).mtime;
+          json(res, 200, {ok: true, raw, mtime: mt.toISOString().slice(0, 16).replace('T', ' ')});
+        }
         catch (e) { json(res, 200, {ok: false, err: String(e && e.message || e)}); }
       });
       let cache = null, cacheAt = 0;
+      // 体检快照（模块级，vite 进程存活期内）：上次打开体检时的定时资产+在办数，供"变化对比"。
+      let ecoPrev = null, ecoPrevAt = 0;
       const loadSchedule = () => new Promise(resolve => {
-        const ps = `[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-ScheduledTask | Where-Object {$_.State -ne 'Disabled'} | ForEach-Object { $i = $_ | Get-ScheduledTaskInfo; '{0}|{1}|{2}' -f $_.TaskName, $_.State, ([string]$i.NextRunTime) }`;
+        // 「我的定时资产」口径（10-19 修，用户令"只显示自己手动建立的"）：旧逻辑=排除 \Microsoft\ 后全收，
+        // 把 IT/第三方软件任务（Bitlocker Probe、OneDrive、Adobe 等）也当成"我的"。改为生态白名单前缀
+        // （与引擎宿主 api/schedule.py SCHTASK_PREFIXES 同源扩充）；禁用的自建任务滤出计数，不入列。
+        const MINE_PREFIX = ['LoopDeck', 'KnowledgeBase', 'MemoryCore', 'ZRunner', 'WxWatch', 'KBSearch',
+          'VpnRouter', 'StarMap', 'WorkerKeeper', 'FeishuBridge', 'ClipAlpha', 'StallMonitor', 'OutlookMail', 'CodexRProxy'];
+        const ps = `[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-ScheduledTask | ForEach-Object { $i = $_ | Get-ScheduledTaskInfo; '{0}|{1}|{2}|{3}' -f $_.TaskName, $_.TaskPath, $_.State, ([string]$i.NextRunTime) }`;
         execFile('powershell', ['-NoProfile', '-Command', ps], {timeout: 25000, maxBuffer: 4 * 1024 * 1024, windowsHide: true}, (err, out) => {
-          const tasks = [];
+          const mine = [], systemNames = new Set();
+          let disabledMine = 0;
           if (!err) for (const line of String(out).split(/\r?\n/)) {
-            const [name, state, next] = line.split('|');
-            if (name && name.trim()) tasks.push({name: name.trim(), state: (state || '').trim(), next: (next || '').trim()});
+            const [name, tpath, state, next] = line.split('|');
+            if (!name || !name.trim()) continue;
+            const row = {name: name.trim(), path: (tpath || '').trim(), state: (state || '').trim(), next: (next || '').trim()};
+            if (row.path.startsWith('\\Microsoft\\')) { systemNames.add(row.name); continue; }
+            if (!MINE_PREFIX.some(p => row.name.startsWith(p))) { systemNames.add(row.name); continue; }  // IT/第三方=系统自带口径
+            if (row.state === 'Disabled') { disabledMine++; continue; }
+            mine.push(row);
           }
           let recurring = [];
           try {
             const r = JSON.parse(fs.readFileSync(RECURRING, 'utf8')).tasks || {};
             recurring = Object.entries(r).map(([key, v]) => ({key, enabled: !!v.enabled, prompt: String(v.prompt || '').slice(0, 60)}));
           } catch {}
-          resolve({ok: !err, tasks: tasks.sort((a, b) => a.name.localeCompare(b.name)), recurring, err: err ? String(err.message || err) : null});
+          resolve({ok: !err, tasks: mine.sort((a, b) => a.name.localeCompare(b.name)),
+            system_count: systemNames.size, disabled_count: disabledMine, recurring,
+            err: err ? String(err.message || err) : null});
         });
       });
       server.middlewares.use('/api/schedule', async (req, res) => {
@@ -345,15 +532,29 @@ function ecosystemPlugin() {
         cache = await loadSchedule(); cacheAt = Date.now();
         json(res, 200, cache);
       });
+      // 体检对比基线：POST 记录当前快照（打开体检时调用），GET 返回上次快照与现在的 diff。
+      // vite 重启后第一次=无基线，第二次打开起有对比。放内存不放盘——体检是"体感"不是台账。
+      server.middlewares.use('/api/eco-baseline', (req, res) => {
+        if (req.method === 'POST') {
+          let body = '';
+          req.on('data', c => { body += c; });
+          req.on('end', () => {
+            try { ecoPrev = JSON.parse(body); ecoPrevAt = Date.now(); json(res, 200, {ok: true}); }
+            catch { json(res, 400, {ok: false}); }
+          });
+          return;
+        }
+        json(res, 200, {ok: true, prev: ecoPrev, prev_at: ecoPrevAt || null, now: Date.now()});
+      });
     }
   };
 }
 
 // base 用相对路径，构建产物可以直接部署在任意子路径。
-// server.proxy：把本机三个现役服务挂成同源路径，页面零跨域直连：
-//   /hub/*   → 8331 引擎宿主（星图数据已脱钩直读 hub.db；代理供服务舱探测/任务详情/附件）
-//   /panel/* → 8331 引擎宿主（写操作走这里，2026-10-16 起 8330 退役）
-//   /kb/*    → 8342 检索服务（语义/关键词混合查询）
+// server.proxy：所有外部服务只经 /api/platform/* 同源前缀进页面（模块化边界，UI 不认识 8331/8342）：
+//   /api/platform/actions/* → 8331 引擎宿主（task/decide/command/attach/ops 写操作）
+//   /api/platform/task-detail|attach-asset|engine-ping → 8331（任务详情/附件/探活）
+//   /api/platform/kb-search|kb-health → 8342 检索服务（语义/关键词混合查询）
 
 // enginePlugin：vite 起服务时拉起工作站引擎宿主（web/server.py --engines）作子进程并全程看护。
 // 2026-10-16 拍板：引擎并 :5173——保活链 StarMap-keep(2min)→vite→本子进程；子进程持 hub 单例锁，
@@ -400,12 +601,22 @@ function enginePlugin() {
 
 export default defineConfig({
   base: './',
-  plugins: [kbGraphPlugin(), memoryStatePlugin(), detailPlugin(), entitiesPlugin(), ecosystemPlugin(), enginePlugin()],
+  plugins: [kbGraphPlugin(), memoryStatePlugin(), detailPlugin(), platformApiPlugin(), entitiesPlugin(), ecosystemPlugin(), enginePlugin()],
   server: {
+    watch: {ignored: ['**/.artifacts/**', '**/.vite/**']},
     proxy: {
-      '/hub': {target: 'http://127.0.0.1:8331', changeOrigin: true, rewrite: p => p.replace(/^\/hub/, '')},
-      '/panel': {target: 'http://127.0.0.1:8331', changeOrigin: true, rewrite: p => p.replace(/^\/panel/, '')},
-      '/kb': {target: 'http://127.0.0.1:8342', changeOrigin: true, rewrite: p => p.replace(/^\/kb/, '')}
+      '/api/platform/actions/task': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/actions\/task/, '/api/task')},
+      '/api/platform/actions/decide': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/actions\/decide/, '/api/decide')},
+      '/api/platform/actions/command': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/actions\/command/, '/api/command')},
+      '/api/platform/actions/attach': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/actions\/attach/, '/api/attach')},
+      '/api/platform/actions/ops': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/actions\/ops/, '/api/action')},
+      '/api/platform/task-detail': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/task-detail/, '/api/task')},
+      '/api/platform/attach-asset': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/attach-asset/, '/attach')},
+      '/api/platform/engine-ping': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/engine-ping/, '/api/ping')},
+      '/api/platform/kb-search': {target: 'http://127.0.0.1:8342', rewrite: p => p.replace(/^\/api\/platform\/kb-search/, '/search')},
+      '/api/platform/kb-ask': {target: 'http://127.0.0.1:8342', rewrite: p => p.replace(/^\/api\/platform\/kb-ask/, '/ask')},
+      '/api/platform/kb-health': {target: 'http://127.0.0.1:8342', rewrite: p => p.replace(/^\/api\/platform\/kb-health/, '/healthz')},
+      '/api/platform/source-op': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/source-op/, '/api/source')}
     }
   }
 });

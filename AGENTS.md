@@ -14,7 +14,7 @@
 | `npm run dev` | 开发服务器，默认 http://127.0.0.1:5173/ |
 | `npm run build` | 构建静态文件到 `dist/` |
 | `npm run import -- --vault <笔记文件夹>` | 把 Markdown / Obsidian 笔记导入成 `src/data/my-data.js` 并切换过去；`--help` 查看选项，`--reset` 切回示例 |
-| `npm run verify` | 检查 skill 格式、导入脚本和当前数据结构 |
+| `npm run verify` | 检查 skill 格式、导入脚本、数据结构、核心动效和平台模块接线 |
 
 ## 结构
 
@@ -22,7 +22,10 @@
 - `src/neural/theme.js`、`neural.css` 顶部的 CSS 变量：配色（只有一套银灰配色）。
 - `src/config.js`：品牌、头像、页脚、localStorage 前缀。
 - `src/data/index.js`：数据入口，只有一行 `export * from './sample.js'` 或 `'./my-data.js'`。
-- `src/data/sample.js`：虚构示例数据，也是数据字段的权威说明。
+- `src/data/sample.js`：虚构示例数据，也是上游导入格式的权威说明；生态星图运行态不再从它取数。
+- `src/platform/modules.js`：个人工作平台模块注册表；水母、顶部分页和图谱锚点共用这份定义。
+- `src/platform/connectors/`：任务、知识库、拍板、记忆、服务五个外接连接器；一个模块故障只降级自己的数据切片。
+- `src/platform/usePlatform.js`：模块并行轮询、数据合并、30 秒刷新与模块状态。
 - `src/neural/graph.js`：图谱推导（目录归属、双链、选题来源、话题、概念提及、双向共振）、布局和本地检索。
 - `src/neural/Home.jsx`：光球、水母、触须场景与三层交互；`Analysis.jsx` 分析栏；`pages.jsx` 三个内页。
 - `scripts/import-notes.mjs`：笔记导入；`scripts/verify.mjs`：自检。
@@ -47,6 +50,7 @@
 - `src/data/my-data.js` 含用户个人笔记，已在 `.gitignore`；不要提交、不要写进示例或文档。
 - `src/data/sample.js` 与 `examples/vault/` 只能放虚构内容。
 - 不要加入联网请求、统计脚本或 AI 调用。
+- UI 不得直连 `/hub`、`/panel`、`/kb` 或任何外部端口；新增能力先登记 `src/platform/modules.js`，再走 `/api/platform/*` 模块边界。
 - 保持「减少动态效果」支持（`prefers-reduced-motion`）和中英双语文案。
 
 ## 改完之后的验证

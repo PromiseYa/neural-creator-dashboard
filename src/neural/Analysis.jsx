@@ -1,11 +1,93 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {KINDS, CONTENT, MODULES, neighbors, latent, askGraph, ecosystemAsk, LINK_KINDS, LINK_EN, STATUS_ZH, PRIO_ZH} from './graph';
+import {createPortal} from 'react-dom';
+import {KINDS, CONTENT, MODULES, neighbors, latent, askGraph, ecosystemAsk, kbHitsToItems, LINK_KINDS, LINK_EN, STATUS_ZH, PRIO_ZH} from './graph';
 import {Icon} from './icons';
 import {stripFrontmatter, firstImage} from './markdown';
 import {wvFocus, wvBlur} from '../data/live';
 
 const fmt = (v, d = 0) => v == null || Number.isNaN(v) ? '—' : Number(v).toLocaleString('zh-CN', {minimumFractionDigits: d, maximumFractionDigits: d});
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// 截止日期+时间选择：日期点开行内月历、时/分点开行内片格（全 DOM，壁纸无 OS 弹层也可用），
+// 快捷键（今天/明天/+3/+7/清除）常驻；时间留空=全天（不设提醒）。
+// bare=true 只出日期一行（详情栏/阅读全文里调截止用，截止本来就只有日期）。
+// （定义在 Analysis.jsx，右侧面板编辑区、阅读全文弹窗、新建任务弹窗三处共用）
+export const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;   // 本地日期，勿用 toISOString（UTC 视角凌晨 0~8 点会差一天）
+export const shiftDay = n => { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); };
+const HM5 = ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'];
+// DuePick v2（星图 10-18 三轮重做）：全 DOM 自绘——日期点开行内月历（上月/下月/周一起头/高亮选中与今天），
+// 时/分点开行内片格（时 00~23、分 5 分钟步进）。不用原生 input[type=date]/select：
+// 壁纸 WebView2（置底窗口）里 OS 级弹层（日历/下拉）弹不出来，就是"选不了日期、时分为点不动"的根。
+// 行内展开也躲开弹层裁剪问题（modal 可滚动，内容自然推下来），观感与星图玻璃风一致。
+export function DuePick({date, time, onDate, onTime, bare}) {
+  const [open, setOpen] = useState(null);   // 'cal' | 'hour' | 'min' | null
+  const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(date || '');
+  const [vm, setVm] = useState(() => { const d = dateOk ? new Date(date + 'T00:00:00') : new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  useEffect(() => {
+    if (open !== 'cal') return;
+    const d = dateOk ? new Date(date + 'T00:00:00') : new Date();
+    setVm(new Date(d.getFullYear(), d.getMonth(), 1));
+  }, [open]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const [h, m] = String(time || '').split(':');
+  const ymLabel = `${vm.getFullYear()} 年 ${vm.getMonth() + 1} 月`;
+  const vmYm = `${vm.getFullYear()}-${String(vm.getMonth() + 1).padStart(2, '0')}`;
+  const first = (vm.getDay() + 6) % 7;   // 周一开头
+  const daysInMonth = new Date(vm.getFullYear(), vm.getMonth() + 1, 0).getDate();
+  const cells = [...Array(first).fill(null), ...Array.from({length: daysInMonth}, (_, k) => k + 1)];
+  const todayIso = iso(new Date());
+  const pickDay = d => { onDate(`${vmYm}-${String(d).padStart(2, '0')}`); setOpen(null); };
+  return <div className="due-pick" onClick={e => e.stopPropagation()}>
+    <div className="dp-row">
+      <button type="button" className={'dp-field' + (dateOk ? '' : ' empty') + (open === 'cal' ? ' on' : '')}
+        onClick={() => setOpen(open === 'cal' ? null : 'cal')} aria-label="选择截止日期" title="点击展开日历">
+        <Icon name="file" size={12}/>{dateOk ? date : '选择日期'}
+      </button>
+      {!bare && <>
+        <button type="button" className={'dp-field sm' + (h ? '' : ' empty') + (open === 'hour' ? ' on' : '')}
+          onClick={() => setOpen(open === 'hour' ? null : 'hour')} aria-label="选择提醒小时">{h || '时'}</button>
+        <span className="dp-sep">:</span>
+        <button type="button" className={'dp-field sm' + (!h || !m ? ' empty' : '') + (open === 'min' ? ' on' : '')}
+          disabled={!h} onClick={() => setOpen(open === 'min' ? null : 'min')} aria-label="选择提醒分钟">{h ? (m || '分') : '分'}</button>
+      </>}
+      <div className="dp-quick">
+        {[['今天', 0], ['明天', 1], ['+3天', 3], ['+7天', 7]].map(([lab, n]) => (
+          <button type="button" key={lab} className={date === shiftDay(n) ? 'on' : ''}
+            onClick={() => { onDate(shiftDay(n)); setOpen(null); }}>{lab}</button>
+        ))}
+        {(date || time) && <button type="button" className="dp-clear" onClick={() => { onDate(''); onTime(''); setOpen(null); }}>清除</button>}
+      </div>
+    </div>
+    {open === 'cal' && <div className="dp-pop">
+      <div className="dp-cal-head">
+        <button type="button" aria-label="上个月" onClick={() => setVm(new Date(vm.getFullYear(), vm.getMonth() - 1, 1))}>‹</button>
+        <b>{ymLabel}</b>
+        <button type="button" aria-label="下个月" onClick={() => setVm(new Date(vm.getFullYear(), vm.getMonth() + 1, 1))}>›</button>
+      </div>
+      <div className="dp-grid dp-week">{['一', '二', '三', '四', '五', '六', '日'].map(d => <span key={d}>{d}</span>)}</div>
+      <div className="dp-grid">
+        {cells.map((d, i) => d == null ? <span key={'e' + i}/> :
+          <button type="button" key={d}
+            className={'dp-cell' + (dateOk && date === `${vmYm}-${String(d).padStart(2, '0')}` ? ' sel' : '') + (todayIso === `${vmYm}-${String(d).padStart(2, '0')}` ? ' today' : '')}
+            onClick={() => pickDay(d)}>{d}</button>)}
+      </div>
+    </div>}
+    {open === 'hour' && <div className="dp-pop">
+      <div className="dp-chips">
+        {Array.from({length: 24}, (_, k) => String(k).padStart(2, '0')).map(x =>
+          <button type="button" key={x} className={'dp-chip' + (h === x ? ' sel' : '')}
+            onClick={() => { onTime(`${x}:${m || '00'}`); setOpen('min'); }}>{x}</button>)}
+      </div>
+    </div>}
+    {open === 'min' && h && <div className="dp-pop">
+      <div className="dp-chips">
+        {HM5.map(x =>
+          <button type="button" key={x} className={'dp-chip' + ((m || '00') === x ? ' sel' : '')}
+            onClick={() => { onTime(`${h}:${x}`); setOpen(null); }}>{x}</button>)}
+      </div>
+      <button type="button" className="dp-chip wide" onClick={() => { onTime(`${h}:00`); setOpen(null); }}>整点提醒 {h}:00</button>
+    </div>}
+  </div>;
+}
 
 export function Count({value, decimals = 0, suffix = ''}) {
   // 页面不可见时 rAF 冻结（壁纸常被窗口遮挡），数字会停在半路甚至挂 0：隐藏期直显终值，回桌面不重滚
@@ -86,8 +168,8 @@ function Insights({items}) {
 }
 
 // 相关知识：笔记详情栏就地向 8342 检索服务发起检索。
-// kbserve 全库检索 10-30 秒是常态（embed 0.1s+全库扫描），异步渐进不阻塞详情栏交互；
-// rerank=false 走纯向量快路，省精排模型开销。
+// 2026-10-21：rerank 改回 true——kbserve 热驻留 + ONNX int8 精排后 <5s，旧"10-30s 冷模型"权衡已过时；
+// 只跑向量粗捞会把字面像的标题垃圾块顶上来（用户反馈"完全不沾边"）。
 function RelatedSearch({node}) {
   const [hits, setHits] = useState(null);
   useEffect(() => {
@@ -95,7 +177,7 @@ function RelatedSearch({node}) {
     setHits(null);
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 35000);
-    fetch(`/kb/search?q=${encodeURIComponent(node.title)}&top=5&rerank=false`, {signal: ctl.signal})
+    fetch(`/api/platform/kb-search?q=${encodeURIComponent(node.title)}&top=5&rerank=true`, {signal: ctl.signal})
       .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
       .then(d => { if (!stop) setHits(d.hits || []); })
       .catch(() => { if (!stop) setHits([]); })
@@ -116,33 +198,41 @@ function RelatedSearch({node}) {
   </section>;
 }
 
-function AskBox({graph, node, onGo}) {
+function AskBox({graph, node, onGo, onAction}) {
   const [q, setQ] = useState('');
   const [res, setRes] = useState(null);
   const [asking, setAsking] = useState(false);   // 输入框聚焦：壁纸模式输入法挂不上，提示改走点选/窗口
   const QUICK = ['相关内容', '双向连接', '最核心的内容'];
-  // 混合追问（10-16）：本地图谱规则 + 工作站全域命中 即时出卡，8342 KB 语义异步补第三张卡
+  // 混合追问（10-16）：本地图谱规则 + 工作站全域命中 即时出卡；8342 kb-ask 异步补综合回答卡（10-20）
   const ask = text => {
     const cards = askGraph(graph, text, node.id);
     const eco = ecosystemAsk(graph, text);
     setRes(eco ? [...cards, eco] : cards);
-    fetch(`/kb/search?q=${encodeURIComponent(text)}&top=3&rerank=false`)
+    fetch(`/api/platform/kb-ask?q=${encodeURIComponent(text)}&top=5`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        const hits = d?.hits || [];
-        if (!hits.length) return;
-        const base = p => String(p || '').split(/[\\/]/).pop().replace(/\.md$/, '');
-        setRes(prev => prev && [...prev, {tone: 'info', title: `知识库命中 ${hits.length} 篇`, en: 'KB · kbserve',
-          text: hits.map(h => base(h.meta?.source_path)).slice(0, 3).join(' · ')}]);
+        if (!d) return;
+        const kbItems = kbHitsToItems(d.hits || [], graph);
+        if (d.answer) {
+          const gen = d.mode === 'general'
+            ? {tone: 'warn', title: '回答（知识库无此内容）', en: 'General', text: d.answer, wrap: true}
+            : {tone: 'gold', title: '回答（依据知识库）', en: 'RAG · KB', text: d.answer, wrap: true, kbItems};
+          setRes(prev => prev && [...prev, gen]);
+        } else if (kbItems.length) {
+          setRes(prev => prev && [...prev, {tone: 'info', title: `知识库命中 ${kbItems.length} 篇`, en: 'KB · kbserve',
+            text: kbItems.slice(0, 3).map((k, i) => `${i + 1}. ${k.name}（${k.meta}）${k.snippet ? '：' + k.snippet : ''}`).join('\n'),
+            wrap: true, kbItems}]);
+        }
       }).catch(() => {});
   };
   return <div className="an-ask">
     {res && <div className="an-ask-res">{res.map((c, i) => <div key={i} className={`ask-card mini tone-${c.tone}`}>
-      <h4>{c.title} <em>{c.en}</em></h4><p>{c.text}</p>
+      <h4>{c.title} <em>{c.en}</em></h4><p style={c.wrap ? {whiteSpace: 'pre-wrap', lineHeight: 1.6} : undefined}>{c.text}</p>
       {c.items?.length > 0 && <div className="chip-row">{c.items.slice(0, 6).map(id => <Chip key={id} graph={graph} id={id} onGo={onGo}/>)}</div>}
+        {c.kbItems?.length > 0 && <div className="chip-row">{c.kbItems.slice(0, 6).map(k => <button key={k.id} className={'chip' + (k.isKb ? ' kb-hit' : '')} style={{'--kc': k.isKb ? '#8b949e' : (KINDS[k.kind]?.color || '#8b949e')}} onClick={() => k.isKb ? onAction({type: 'readKb', path: k.path, title: k.name}) : onGo(k.id)}>{k.name}{k.meta && <small>{k.meta}</small>}</button>)}</div>}
     </div>)}</div>}
     <form onSubmit={e => { e.preventDefault(); if (q.trim()) ask(q); }}>
-      <input value={q} onChange={e => setQ(e.target.value)} onFocus={e => { setAsking(true); wvFocus(e.target); }} onBlur={() => { setAsking(false); wvBlur(); }} placeholder="追问这条内容… Ask about this note" aria-label="追问这条内容"/>
+      <input value={q} onChange={e => setQ(e.target.value)} onFocus={e => { setAsking(true); wvFocus(e.target); }} onBlur={() => { setAsking(false); wvBlur(); }} data-wv-submit="form" placeholder="追问这条内容… Ask about this note" aria-label="追问这条内容"/>
       <button aria-label="提交"><Icon name="send" size={15}/></button>
     </form>
     <div className="an-ask-chips">
@@ -157,12 +247,12 @@ function AskBox({graph, node, onGo}) {
 const sharedConcepts = (a, b) => (a.shared || []).filter(x => (b.shared || []).includes(x));
 
 // 任务执行现场（与 8331 详情抽屉同源）：事件时间线 + 附件（图片缩略图点击灯箱放大，视频内嵌可播）。
-// 附件文件本体走 vite 代理 /hub/attach/<tid>/<文件>，只读。
+// 附件文件本体走 vite 代理 /hub/attach/<tid>/<文件>，只读。（星图 10-18 起同时供阅读全文弹窗复用）
 const VIDEO_EXT = ['.mp4', '.mov', '.webm', '.avi', '.mkv'];
 const ATT_LOST = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="64"><rect fill="%2310151c" width="200" height="64" rx="8"/><text x="100" y="37" fill="%238b949e" font-size="11" text-anchor="middle">图片文件已不可用</text></svg>';
 // 附件大图查看器（10-16 升级）：默认等比适配整屏，滚轮以光标为锚缩放（0.1~8x）、按住拖拽平移、
 // 双击在适配/100% 间切换——长截图/大图都能完整看到每个角落；Esc 或点背景关闭。
-function Lightbox({src, onClose}) {
+export function Lightbox({src, onClose}) {
   const [v, setV] = useState(null);   // {fit, z, tx, ty} 缩放/平移态（img 加载后才有 fit）
   const drag = useRef(null);
   useEffect(() => {
@@ -175,7 +265,10 @@ function Lightbox({src, onClose}) {
     window.addEventListener('pointerup', stopAll);
     return () => window.removeEventListener('pointerup', stopAll);
   }, []);
-  return <div className="lightbox" onClick={e => { if (e.target === e.currentTarget) onClose(); }} role="dialog" aria-label="附件大图，滚轮缩放，拖拽平移，Esc 关闭">
+  // 星图 10-18 根治"图片放大被压住"：灯箱 z=90 原地渲染时困在 analysis-wrap(z=8)/modal 等父级的
+  // 层叠上下文里，实际全局层级只有 8——水母层(20)/顶栏(40) 都能盖住放大图。
+  // createPortal 直挂 document.body：z=90 全局生效，压过一切页面内容，只让 veil 弹窗(100)压它。
+  return createPortal(<div className="lightbox" onClick={e => { if (e.target === e.currentTarget) onClose(); }} role="dialog" aria-label="附件大图，滚轮缩放，拖拽平移，Esc 关闭">
     <img src={src} alt=""
       onLoad={e => { const iw = e.currentTarget.naturalWidth, ih = e.currentTarget.naturalHeight;
         const fit = Math.min((window.innerWidth * .92) / iw, (window.innerHeight * .9) / ih, 1);
@@ -194,9 +287,9 @@ function Lightbox({src, onClose}) {
         setV({...v, tx: drag.current.tx + e.clientX - drag.current.x, ty: drag.current.ty + e.clientY - drag.current.y}); }}
       onPointerUp={stopAll}/>
     {v && <div className="lb-hud">滚轮缩放 {Math.round(v.z * 100 / (v.fit || 1))}% · 拖动平移 · 双击{Math.abs(v.z - v.fit) < .02 ? '原始尺寸' : '适配整屏'} · Esc 关闭</div>}
-  </div>;
+  </div>, document.body);
 }
-function TaskExtra({tid, detail, onZoom}) {
+export function TaskExtra({tid, detail, onZoom}) {
   const events = detail?.events || [];
   const atts = detail?.attachments || [];
   if (!events.length && !atts.length) return null;
@@ -226,7 +319,8 @@ function TaskExtra({tid, detail, onZoom}) {
 }
 
 // 任务内容正文：把"【图片解析 文件名】"引用就地渲染成内嵌图片（点击灯箱放大），其余按段落显示
-function TaskContent({tid, text, onZoom}) {
+// （星图 10-18 起同时供阅读全文弹窗复用）
+export function TaskContent({tid, text, onZoom}) {
   const src = String(text || '');
   if (!src.trim()) return <p>（这条任务没有补充内容，标题即全部——可在下方补备注。）</p>;
   const parts = src.split(/(【图片解析\s+[^\]】]+】)/g);
@@ -234,7 +328,7 @@ function TaskContent({tid, text, onZoom}) {
   return <div className="tc-body">{parts.map((seg, i) => {
     const m = seg.match(/^【图片解析\s+([^\]】]+)】$/);
     if (!m) return seg.trim() ? <p key={i}>{seg}</p> : null;
-    const url = `/hub/attach/${encodeURIComponent(tid)}/${encodeURIComponent(m[1].trim())}`;
+    const url = `/api/platform/attach-asset/${encodeURIComponent(tid)}/${encodeURIComponent(m[1].trim())}`;
     return <button key={i} className="inline-att" onClick={() => onZoom(url)} title={`放大查看 ${m[1]}`}>
       <img src={url} alt={m[1]} loading="lazy" onError={e => { e.currentTarget.onerror = null; e.currentTarget.src = ATT_LOST; }}/>
     </button>;
@@ -253,7 +347,7 @@ function useDetail(node) {
     setD(null);
     if (!tid && !did && !nid) return;
     let stop = false;
-    const url = tid ? `/hub/api/task?id=${encodeURIComponent(tid)}`
+    const url = tid ? `/api/platform/task-detail?id=${encodeURIComponent(tid)}`
       : did ? `/api/hub-detail?d=${encodeURIComponent(did)}`
       : `/api/note-raw?id=${encodeURIComponent(nid)}`;
     fetch(url).then(r => r.json())
@@ -264,8 +358,54 @@ function useDetail(node) {
   return d;
 }
 
-// 任务来源 → 中文（hub 的 source 取值：cron/ai/wechat/hub/manual/star-map…）
-const SRC_ZH = {cron: '定时调度', ai: 'AI 会话', wechat: '微信指令', hub: '工作站', manual: '手动', 'star-map': '星图', oa: 'OA'};
+// 任务来源 → 中文白话（星图 10-21 用户令「来源要通俗易懂」）：
+// hub 的 source 取值 cron/ai/wechat/hub/manual/star-map/plan/inbox/decision/web/wxfile…
+export const SRC_ZH = {
+  plan: 'Excel 来源', cron: '调度器巡检', wechat: '微信@我', inbox: '接收区', 'star-map': '星图新建',
+  manual: '手动', decision: '拍板派工', ai: 'AI 会话', hub: '工作站', oa: 'OA',
+  web: '网页', wxfile: '微信文件', feishu: '飞书', zcode: 'ZCode', 'zrunner-test': 'ZRunner 测试'
+};
+// 每条来源通道一句话白话（10-21）：不用查文档，一眼知道这条任务是怎么来的
+const SRC_DESC = {
+  plan: '引擎按来源配置的频率（如 20 分钟）扫 Excel，把「还没完成的行」自动导成任务，可追溯到哪个文件哪个页签',
+  cron: '调度器每 15 分钟自我巡检，发现异常（工作者离线/AI 出勤超期/TFS 取新失败/看门狗不一致等）就自动建 [调度] 任务',
+  wechat: 'wxwatch 哨兵盯微信群，@你/点你名的消息自动落成任务，原文保留可查',
+  inbox: '丢进接收区的文件/内容自动落成任务',
+  'star-map': '你在星图里点「＋ 新任务」手建的',
+  manual: '手动录入/截图创建的任务',
+  decision: '拍板批准后自动派生的任务',
+  ai: 'AI 会话里直接产生的任务',
+  web: '网页/旧面板创建的任务',
+  wxfile: '微信收到的文件类内容',
+  hub: '工作站创建的任务',
+  oa: 'OA 流程创建的任务'
+};
+// 任务「调度与溯源」白话行（10-21）：来源通道 + 一句白话 + Excel/页签/微信原文等细节
+export function taskOrigin(t, full) {
+  const src = String(t?.source || full?.source || '');
+  const ref = String(t?.source_ref || full?.source_ref || '');
+  const zh = SRC_ZH[src] || src || '—';
+  const out = [`来源 ${zh}${SRC_DESC[src] ? ' · ' + SRC_DESC[src] : ''}`];
+  if (src === 'plan') {
+    // Excel 来源：直接给出 哪个文件·哪个页签（后端 attachSrcInfo 附带 src_name/src_sheet/src_path）
+    if (t?.src_path) {
+      const file = String(t.src_path).split(/[\\/]/).pop();
+      out.push(`Excel：${file}${t?.src_sheet ? ` · 页签「${t.src_sheet}」` : ''}`);
+    }
+    if (ref) out.push(`来源行：${ref.replace(/^src\d+:/, '')}`);
+  } else if (src === 'wechat' && ref) {
+    // 微信@我：拆出 群/发言人 与 @我的原文
+    const seg = ref.split('\n');
+    const head = (seg[0] || '').replace(/wxid\S+/g, '').replace(/:+\s*$/g, '').trim();
+    const rest = seg.slice(1).map(s => s.trim()).filter(Boolean).join(' ');
+    if (head) out.push(`群/发言人：${head}`);
+    if (rest) out.push(`原文：${rest.length > 120 ? rest.slice(0, 120) + '…' : rest}`);
+  } else if (ref) {
+    out.push(`关联：${ref.length > 100 ? ref.slice(0, 100) + '…' : ref}`);
+  }
+  out.push(`创建 ${t?.created_at || full?.created_at || '—'} · 更新 ${t?.updated_at || full?.updated_at || '—'}`);
+  return out.join('\n');
+}
 
 const dueDays = due => {
   if (!due) return '';
@@ -307,6 +447,7 @@ function analyze(graph, node, detail) {
     if (full.rollback_ref) extras.push(['回滚点', 'Rollback', String(full.rollback_ref), 'muted']);
     return {
       badge: [st, 'Status'], status: `${t.id || ''} · 优先级 ${PRIO_ZH[t.priority] || t.priority || '—'} · 截止 ${t.due || '—'}${dueDays(t.due)}`,
+      action: ['阅读全文', 'Read full task', {type: 'read', id: node.id}],   // 星图 10-18：面板只简单展示，全文/编辑/附件进阅读全文
       ops: OPS.map(([zh, en, op, act]) => ({zh, en, op, act, cur: false})),
       metric: {label: '同状态任务', en: 'Same status', value: T.length ? 100 * same / T.length : 0, decimals: 0,
         level: t.status === 'doing' ? ['进行', 'Doing', 'high'] : t.status === 'waiting_confirm' ? ['待确认', 'Confirm', 'mid'] : ['排队', 'Queued', 'low'],
@@ -314,7 +455,7 @@ function analyze(graph, node, detail) {
       tiles: [['works', T.length, '未结任务', 'Open'], ['pulse', t.due ? 1 : 0, '有截止', 'Due'], ['file', notes.replace(/\s/g, '').length, '内容字数', 'Notes'], ['link', d.both, '关联', 'Links']],
       content: notes,               // 任务正文单独渲染：内嵌显示"【图片解析 xx.png】"引用的图片
       insights: [
-        ['调度与溯源', 'Origin', `来源 ${SRC_ZH[t.source] || t.source || '—'}${full.source_ref ? ` · 关联 ${full.source_ref}` : ''} · 创建 ${t.created_at || '—'} · 更新 ${t.updated_at || '—'}`, 'muted'],
+        ['调度与溯源', 'Origin', taskOrigin(t, full), 'muted'],
         ...extras
       ]
     };
@@ -327,6 +468,7 @@ function analyze(graph, node, detail) {
     const settled = dc.status && dc.status !== 'pending';
     return {
       badge: [dc.status === 'pending' ? '待拍板' : (dc.status || '已收口'), 'Decision'], status: `${dc.id || ''} · 提出 ${String(dc.created_at || full.created_at || '').slice(0, 16) || '—'}${settled && full.decided_at ? ` · 裁决 ${String(full.decided_at).slice(0, 16)}` : ''}`,
+      action: ['阅读全文', 'Read decision', {type: 'read', id: node.id}],
       decideOps: (opts.length ? opts.map(o => ({zh: `批准 ${o.key || ''}`, en: 'Approve', to: 'approved', choice: o.key})) : [{zh: '批准执行', en: 'Approve', to: 'approved'}])
         .concat([{zh: '否决', en: 'Reject', to: 'rejected'}, {zh: '销账', en: 'Resolve', to: 'resolved'}]),
       metric: {label: '待拍板存量', en: 'Pending', value: D.length ? 100 * D.filter(x => x.decision?.status === 'pending').length / D.length : 0, decimals: 0,
@@ -363,6 +505,7 @@ function analyze(graph, node, detail) {
     return {
       badge: [{queued: '排队', dispatched: '已派', done: '完成', failed: '失败', pending_confirm: '待确认'}[cm.status] || cm.status || '—', 'Command'],
       status: `${cm.id || ''} · 来源 ${cm.source || '—'} · 登记 ${String(cm.created_at || '').slice(0, 16)}${cm.task_id ? ` · 派生 ${cm.task_id}` : ''}${cm.rerun_of ? ` · 重跑自 ${cm.rerun_of}` : ''}`,
+      action: ['阅读全文', 'Read command', {type: 'read', id: node.id}],
       ops: cm.status === 'done' ? [] : [{zh: '一键重跑', en: 'Rerun', op: 'rerun', act: 'cmdOp'}],
       metric: {label: '台账完成率', en: 'Done rate', value: M.length ? 100 * done / M.length : 0, decimals: 0,
         level: cm.status === 'done' ? ['已结', 'Done', 'mid'] : cm.status === 'failed' ? ['失败', 'Failed', 'low'] : ['在途', 'Live', 'high'],
@@ -482,11 +625,31 @@ export function Analysis({graph, node, module, onGo, onAction, onClose}) {
   const [editing, setEditing] = useState(null);   // 任务编辑态：{note: '备注草稿'} / {due: 'YYYY-MM-DD'}（8330 note/due op）
   const a = useMemo(() => analyze(graph, node, detail), [graph, node, detail]);
   const color = KINDS[node.kind].color;
+  // 一键复制（10-19，与 Modal 同款）：壁纸 WebView2 合成鼠标拖选不工作，分析栏头部给复制按钮兜底。
+  const scrollRef = useRef(null);
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef(null);
+  const copyCard = async () => {
+    const text = (scrollRef.current?.innerText || '').trim();
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); }
+    catch {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch {}
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(false), 1800);
+  };
   return <div className="analysis glass" style={{'--kc': color}} role="region" aria-label={`${node.title} 的分析`}>
     <p className="an-float">分析概览 <em>Analysis overview</em> · {module?.title} {module?.en}</p>
-    <div className="an-scroll">
+    <div className="an-scroll" ref={scrollRef}>
       <header className="an-head">
         <span className="an-cat"><span className="an-cat-icon"><Icon name={module?.icon || 'file'} size={15}/></span>{module?.title}<em>{module?.en}</em></span>
+        <button className="icon-btn" onClick={copyCard} aria-label="复制分析栏全部文字" title="复制分析栏全部文字（壁纸模式拖选不动，用这颗按钮）">{copied ? <Icon name="check" size={15}/> : <Icon name="copy" size={15}/>}</button>
         <button className="icon-btn" onClick={onClose} aria-label="关闭分析"><Icon name="close" size={15}/></button>
       </header>
       <div className="an-title-row">
@@ -523,7 +686,10 @@ export function Analysis({graph, node, module, onGo, onAction, onClose}) {
       <Metric {...a.metric}/>
       <Tiles tiles={a.tiles}/>
       {a.all && <section className="an-section"><h3>全部指标 <em>All metrics</em></h3><div className="an-all">{a.all.map(([zh, en, v]) => <div key={zh}><span>{zh}<em>{en}</em></span><b>{v}</b></div>)}</div></section>}
-      {a.content != null && <section className="an-section"><h3>任务内容 <em>Content</em></h3><TaskContent tid={node.task?.id} text={a.content} onZoom={setZoom}/></section>}
+      {a.content != null && <section className="an-section"><h3>任务内容 <em>Content</em></h3>
+        <div className="tc-preview"><TaskContent tid={node.task?.id} text={a.content} onZoom={setZoom}/></div>
+        {String(a.content).replace(/\s/g, '').length > 160 && <p className="tc-more">内容已简化展示 · 点「阅读全文」看完整内容、编辑与附件</p>}
+      </section>}
       {node.kind === 'task' && detail?.ok && <section className="an-section">
         <h3>编辑 <em>Edit</em></h3>
         <div className="task-edit">
@@ -535,7 +701,7 @@ export function Analysis({graph, node, module, onGo, onAction, onClose}) {
             </div>
           </> : <button className="ghost te-btn" onClick={() => setEditing({note: detail?.task?.notes || ''})}>✎ 改备注 <em>Note</em></button>}
           {editing?.due !== undefined ? <>
-            <input type="date" value={editing.due} onChange={e => setEditing({due: e.target.value})} onFocus={e => wvFocus(e.target)} onBlur={wvBlur} aria-label="选择截止日期"/>
+            <DuePick date={editing.due} time={''} onDate={v => setEditing({due: v})} onTime={() => {}} bare/>
             <div className="te-actions">
               <button className="primary" onClick={() => { onAction({type: 'taskOp', id: node.task?.id, op: 'due', due: editing.due || ''}); setEditing(null); }}>保存截止 <em>Save</em></button>
               <button onClick={() => { onAction({type: 'taskOp', id: node.task?.id, op: 'due', due: ''}); setEditing(null); }}>清除</button>
@@ -550,7 +716,7 @@ export function Analysis({graph, node, module, onGo, onAction, onClose}) {
       {node.tags?.length > 0 && <section className="an-section"><h3>话题标签 <em>Topics</em></h3><div className="chip-row">{node.tags.map(t => <span key={t} className="chip static" style={{'--kc': KINDS.tag.color}}>#{t}</span>)}</div></section>}
       <Links graph={graph} node={node} onGo={onGo}/>
     </div>
-    <AskBox graph={graph} node={node} onGo={onGo}/>
+    <AskBox graph={graph} node={node} onGo={onGo} onAction={onAction}/>
     {zoom && <Lightbox src={zoom} onClose={() => setZoom(null)}/>}
   </div>;
 }

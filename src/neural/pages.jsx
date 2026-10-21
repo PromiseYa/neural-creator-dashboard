@@ -5,6 +5,7 @@ import {Analysis, Count} from './Analysis';
 import {snapshot} from '../data';
 import {posts} from './works';
 import {T} from './theme';
+import {wvFocus, wvBlur} from '../data/live';
 
 const fmt = v => v == null ? '—' : Number(v).toLocaleString('zh-CN');
 
@@ -33,7 +34,7 @@ export function Library({graph, selected, setSelected, onGo, onAction}) {
     <div className="library-layout">
       <section className="works-col">
         <div className="toolbar-row">
-          <label className="search"><Icon name="search" size={15}/><input value={q} onChange={e => setQ(e.target.value)} placeholder="搜索作品… Search works" aria-label="搜索作品"/></label>
+          <label className="search"><Icon name="search" size={15}/><input value={q} onChange={e => setQ(e.target.value)} onFocus={wvFocus} onBlur={wvBlur} placeholder="搜索作品… Search works" aria-label="搜索作品"/></label>
           <div className="seg" role="group" aria-label="排序">{[['date', '最新', 'Latest'], ['views', '观看', 'Views'], ['rate', '收藏率', 'Save rate'], ['follows', '涨粉', 'Follows']].map(([k, zh, en]) => <button key={k} className={sort === k ? 'active' : ''} onClick={() => setSort(k)}>{zh}<em>{en}</em></button>)}</div>
         </div>
         <div className="works-grid">{rows.map((p, i) => {
@@ -117,9 +118,10 @@ export function Drafts({graph, drafts, setDrafts, active, setActive, onNew, onDe
       </aside>
       {draft ? <section className="editor glass">
         <div className="editor-meta"><span>03-创作台 / 正在写 <em>Writing</em></span><span><Icon name="check" size={13}/>已保存到此浏览器 <em>Saved locally</em></span></div>
-        <input className="editor-title" value={draft.title} onChange={e => change('title', e.target.value)} placeholder="给这篇内容一个标题 Title" aria-label="草稿标题"/>
+        <input className="editor-title" value={draft.title} onChange={e => change('title', e.target.value)} onFocus={wvFocus} onBlur={wvBlur} placeholder="给这篇内容一个标题 Title" aria-label="草稿标题"/>
         <div className="editor-area">
           <textarea ref={area} value={draft.body} aria-label="草稿正文" placeholder="开始写… 输入 [[ 链接到其他笔记 Type [[ to link a note"
+            onFocus={wvFocus} onBlur={wvBlur}
             onChange={e => { change('body', e.target.value); check(e.target); }} onClick={e => check(e.target)}
             onKeyDown={e => {
               if (!suggest?.list.length) return;

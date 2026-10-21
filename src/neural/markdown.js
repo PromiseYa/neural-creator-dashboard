@@ -40,14 +40,14 @@ function inline(text, res) {
     else if (m[2]) {                                    // ![[嵌入]]：图片走 asset，笔记当双链
       const name = m[2].slice(3, -2).split('|')[0].trim();
       if (IMG_EXT.test(name)) { out += `<img src="${assetUrl(res.dir, name)}" alt="${esc(name)}" loading="lazy"/>`; res.images++; }
-      else out += `<button type="button" class="md-wiki" data-wiki="${esc(name.replace(/\.md$/, ''))}">${esc(name)}</button>`;
+      else out += `<span class="md-wiki" data-wiki="${esc(name.replace(/\.md$/, ''))}">${esc(name)}</span>`;
     } else if (m[3]) {                                  // ![alt](path)
       const im = m[3].match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
       out += `<img src="${assetUrl(res.dir, im[2])}" alt="${esc(im[1])}" loading="lazy"/>`; res.images++;
     } else if (m[4]) {                                  // [[双链]]
       const t = m[4].slice(2, -2).split('|');
       const target = t[0].split('#')[0].split('/').pop().replace(/\.md$/, '').trim();
-      out += `<button type="button" class="md-wiki" data-wiki="${esc(target)}">${esc((t[1] || t[0]).trim())}</button>`;
+      out += `<span class="md-wiki" data-wiki="${esc(target)}">${esc((t[1] || t[0]).trim())}</span>`;
     } else if (m[5]) {                                  // [text](http…)
       const lk = m[5].match(/^\[([^\]]*)\]\(([^)]+)\)$/);
       out += `<a href="${esc(lk[2])}" target="_blank" rel="noreferrer noopener">${esc(lk[1] || lk[2])}</a>`;
