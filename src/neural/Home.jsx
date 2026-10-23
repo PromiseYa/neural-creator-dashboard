@@ -613,8 +613,9 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
           }
           rips.forEach(c => {
             if (!c) return;
-            const ph = t - (c._t || -9) > 0 ? Math.min(1, (t - c._t) / 2.2) : 1;
-            const on = c._t && ph < 1 && pu > .02;
+            if (!c._t) { c.style.opacity = 0; return; }   // 未激活：直接隐藏——原代码照走 setAttribute('r',(t-undefined)/2.2=NaN) 每帧刷 console 错误
+            const ph = t - c._t > 0 ? Math.min(1, (t - c._t) / 2.2) : 1;
+            const on = ph < 1 && pu > .02;
             c.setAttribute('cx', x); c.setAttribute('cy', y);
             c.setAttribute('r', Math.max(1, s * .34 + s * .82 * (1 - Math.pow(1 - ph, 2.2))));
             c.style.opacity = on ? (1 - ph) * .48 * Math.min(1, pu * 3.5) : 0;
@@ -1079,8 +1080,9 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
       const es = document.querySelector('.ecostream');
       if (es) { const r = es.getBoundingClientRect(); es.classList.toggle('lit', e.clientX >= r.left - 10 && e.clientX <= r.right + 10 && e.clientY >= r.top - 8 && e.clientY <= r.bottom + 8); }
       const hc = document.querySelector('.hub-copy');
-      if (hc) { const r = hc.getBoundingClientRect(); hc.classList.toggle('lit', e.clientX >= r.left - 40 && e.clientX <= r.right + 40 && e.clientY >= r.top - 24 && e.clientY <= r.bottom + 24); } };
-    const onSceneLeave = () => { live.current.mx = null; sceneRect = null; document.querySelector('.ecostream')?.classList.remove('lit'); };
+      // 仅 hub 阶段点亮：stage 视图 hub-copy 本该 opacity:0 隐藏，lit 同优先级会盖出幽灵文字
+      if (hc) { const r = hc.getBoundingClientRect(); hc.classList.toggle('lit', L.stage === 'hub' && e.clientX >= r.left - 40 && e.clientX <= r.right + 40 && e.clientY >= r.top - 24 && e.clientY <= r.bottom + 24); } };
+    const onSceneLeave = () => { live.current.mx = null; sceneRect = null; document.querySelector('.ecostream')?.classList.remove('lit'); document.querySelector('.hub-copy')?.classList.remove('lit'); };
     window.addEventListener('mousemove', onMouseMove);
     el.addEventListener('pointerleave', onSceneLeave);
     return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('touchmove', onTouchMove); el.removeEventListener('touchend', onTouchEnd);

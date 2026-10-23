@@ -181,9 +181,13 @@ html, body { margin: 0; background: #0d0e0e; height: 100%; overflow: hidden; ove
 .hub-copy, .stage-tools, .topbar, .crumbs, .zone-trail, .analysis-wrap, .dock, .legend,
 .jelly-label .jl-icon, .jelly-label .jl-count, .jelly-label .jl-name, .jelly-label .jl-sub,
 .fan-item .fi-title, .fan-item .fi-meta, .fan-item .fi-badge { opacity: .16; filter: saturate(.5); transition: opacity .45s ease, filter .45s ease; }
-.hub-copy.lit, .stage-tools:hover, .stage-tools:focus-within, .topbar:hover, .crumbs:hover, .zone-trail:hover, .analysis-wrap:hover, .dock:hover, .dock:focus-within, .legend:hover,
+.stage-tools:hover, .stage-tools:focus-within, .topbar:hover, .crumbs:hover, .zone-trail:hover, .analysis-wrap:hover, .dock:hover, .dock:focus-within, .legend:hover,
 .jelly-label:hover .jl-icon, .jelly-label:hover .jl-count, .jelly-label:hover .jl-name, .jelly-label:hover .jl-sub,
 .fan-item:hover .fi-title, .fan-item:hover .fi-meta, .fan-item:hover .fi-badge { opacity: 1; filter: none; }
+/* hub-copy.lit 单独提权限 hub 阶段：原 .hub-copy.lit(0-2-0)与上方 stage 隐藏规则(0-2-0)平级且定义在后——
+   stage 视图 lit 会把该隐藏的 hub-copy 盖成 opacity:1 幽灵文字（mousemove 是 window 级，stage 下也跑判定）；
+   hub-copy 挂在 .home-stage 下（不是 .scene），stage class 两个容器都带——用 .stage-hub 前缀两者通吃 */
+.stage-hub .hub-copy.lit { opacity: 1; filter: none; }
 /* —— 生态流水（左侧竖条，全视图固定）：无边框无底色，左上文案下方垂到屏幕底，面板可滚、底部渐隐 —— */
 .ecostream { position: absolute; left: 44px; bottom: 0; width: 330px; z-index: 1; display: flex; flex-direction: column; animation: ecoIntro 1s 2s backwards; pointer-events: auto;
   /* 平时重度虚化隐入星野（把注意力让给神经网络动画），光标移入才显形；
