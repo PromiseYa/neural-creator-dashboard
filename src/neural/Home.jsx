@@ -252,249 +252,299 @@ function itemMeta(n) {
   }
 }
 
-// —— 布局目标（星图 10-21 无限画布：世界坐标版）——
-// 世界原点 (0,0)=光球中心，所有 stage 一致；相机（Home 层 camTgt→camView 弹簧）把世界投影到屏幕。
-// 第一环=五只水母（椭圆轨道+自由游弋物理，全 stage 常驻——进模块不再"换屏"，祖先兄弟永远在画布上）；
-// 模块打开后内容沿该模块方向的扇区同心外扩：祖先层在浅环（钻入卡高亮、兄弟卡变暗常驻）、
-// 当前清单在深环，长清单超出单圈最大弧长后自动盘旋到更外一圈（283 张卡也铺得开）。
+// —— 布局目标 ——
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export function targets(L, t) {
   const {w: W, h: H} = L.size, st = L.stage, narrow = W < 760;
   const swim = L.reduced ? 0 : 1;
   const res = {orb: {}, jelly: {}, fan: null, chain: null, pfan: null};
-  // 光球永远在原点（hub 的视觉重心略下移/窄屏略上移的老偏置保留为世界纵偏 wcy）
-  const cy = narrow ? H * .47 : H * .53;
-  const wcy = cy - H / 2;
-  const osz = st === 'hub'
-    ? (narrow ? clamp(W * .56, 180, 280) : clamp(Math.min(W, H) * .5, 250, 440))
-    : clamp(Math.min(W, H) * .38, 190, 300);
-  res.orb = {x: 0, y: wcy, s: osz};
-  const rx = narrow ? W * .36 : Math.min(W * .36, 540), ry = narrow ? H * .21 : Math.min(H * .32, 262);
-  // 自由游弋（全 stage）：每只水母带独立速度慢速漫游，方向随机掉头、边界反弹、成对相撞互换法向速度弹开；
-  // 头与触手随移动方向倾倒，被光标吸引时头转向光标
-  const dt = Math.min(L.dt || 0, .05);
-  const RM = L.roam || (L.roam = {});
-  // 第一环轨道基点（角度来自模块注册表，带慢漂移；a 也供内容环扇区中心复用——环跟水母同组微漂）
-  const bases = MODULES.map((m, i) => {
-    const a = (m.angle + swim * 10 * Math.sin(t * .22 + i * 1.7)) * Math.PI / 180;
-    const rr = 1 + swim * .07 * Math.sin(t * .3 + i);
-    return {x: Math.cos(a) * rx * rr, y: wcy + Math.sin(a) * ry * rr, a};
-  });
-  const js = MODULES.map((m, i) => {
-    const rm = RM[m.id] || (RM[m.id] = {x: 0, y: 0, vx: 4, vy: 0, ang: Math.random() * 6.28, spd: 6, turnAt: 0, targetAng: 0, targetSpd: 7});
-    if (swim) {
-      if (t >= rm.turnAt) { rm.turnAt = t + 5 + Math.random() * 7; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 1.8 + Math.random() * 4; }   // 随机掉头（十三轮再放缓：速度上限 7.2→5.8，转向间隔更长）
-      let da = rm.targetAng - rm.ang; da = Math.atan2(Math.sin(da), Math.cos(da));
-      rm.ang += clamp(da, -.55 * dt, .55 * dt);   // 受限角速度（0.75→0.55，转弯更柔）
-      rm.spd += (rm.targetSpd - rm.spd) * Math.min(1, dt * .5);
-      rm.vx += (Math.cos(rm.ang) * rm.spd - rm.vx) * Math.min(1, dt * .8);
-      rm.vy += (Math.sin(rm.ang) * rm.spd * .4 - rm.vy) * Math.min(1, dt * .8);
-      rm.x += rm.vx * dt; rm.y += rm.vy * dt;
-      // 弱归心弹簧（帧率无关）：水母可自主漂浮，偏离远了才慢慢拉回，线不会无限拉长
-      rm.vx += -rm.x * .1 * dt; rm.vy += -rm.y * .1 * dt;
-      // 最大漂浮范围：椭圆半径 65%，超过后平滑减速（不瞬间反弹，丝滑不卡顿）
-      const maxOx = rx * .65, maxOy = ry * .65;
-      if (rm.x > maxOx) { rm.x = maxOx; rm.vx *= .55; }
-      else if (rm.x < -maxOx) { rm.x = -maxOx; rm.vx *= .55; }
-      if (rm.y > maxOy) { rm.y = maxOy; rm.vy *= .55; }
-      else if (rm.y < -maxOy) { rm.y = -maxOy; rm.vy *= .55; }
-    }
-    return {rm, bx: bases[i].x, by: bases[i].y};
-  });
-  js.forEach(({rm, bx, by}) => {   // 边界反弹（按绝对位置）；吸附态跳过。世界坐标下反弹面=相机回家时的可视矩形——
-    // 拉远缩小后水母仍都聚在"主页视野"里找得到，语义同旧屏幕墙
-    if (rm.att) return;
-    const ax = bx + rm.x, ay = by + rm.y;
-    const x0 = -W / 2 + 100, x1 = W / 2 - 100, y0 = -H / 2 + 90, y1 = H / 2 - 90;
-    if (ax < x0) { rm.x = x0 - bx; rm.vx = Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
-    if (ax > x1) { rm.x = x1 - bx; rm.vx = -Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
-    if (ay < y0) { rm.y = y0 - by; rm.vy = Math.abs(rm.vy); rm.ang = -rm.ang; }
-    if (ay > y1) { rm.y = y1 - by; rm.vy = -Math.abs(rm.vy); rm.ang = -rm.ang; }
-  });
-  for (let i = 0; i < js.length; i++) for (let k = i + 1; k < js.length; k++) {   // 成对相撞：互换法向速度+位置各退一半重叠
-    const A = js[i], B = js[k];
-    if (t < (A.rm.noHit || 0) || t < (B.rm.noHit || 0)) continue;   // 免疫期（刚脱钩的惯性飘逸不被立刻再弹）
-    if (A.rm.att || B.rm.att) continue;   // 吸附态不参与碰撞（拖动零碰撞）
-    const dx = (A.bx + A.rm.x) - (B.bx + B.rm.x), dy = (A.by + A.rm.y) - (B.by + B.rm.y);
-    const d = Math.hypot(dx, dy), jszD = narrow ? 92 : clamp(W * .12, 120, 184), minD = jszD * .92, softD = jszD * 1.12;
-    if (d > 0.01 && d < softD) {
-      // 气球式碰开：硬碰撞区强力推开 + 外围软排斥区轻触即弹，挨着就弹开不重叠
-      const nx = dx / d, ny = dy / d;
-      if (d < minD) {
-        const push = Math.min(16, (minD - d) / 2);
-        A.rm.x += nx * push; A.rm.y += ny * push; B.rm.x -= nx * push; B.rm.y -= ny * push;
-      } else {
-        const soft = (softD - d) / (softD - minD) * 2.5;
-        A.rm.x += nx * soft; A.rm.y += ny * soft; B.rm.x -= nx * soft; B.rm.y -= ny * soft;
+  if (st === 'hub') {
+    const s = narrow ? clamp(W * .56, 180, 280) : clamp(Math.min(W, H) * .5, 250, 440);
+    const cy = narrow ? H * .47 : H * .53;
+    res.orb = {x: W / 2, y: cy, s};
+    const rx = narrow ? W * .36 : Math.min(W * .36, 540), ry = narrow ? H * .21 : Math.min(H * .32, 262);
+    // 自由游弋（宽屏 hub）：摆脱"钉在椭圆上小幅摆动"——每只水母带独立速度慢速漫游，
+    // 方向随机掉头（不会一直一个方向）、屏幕边界反弹、成对相撞互换法向速度弹开；
+    // 头与触手随移动方向倾倒，被光标吸引时头转向光标（atan2(dx,-dy)：光标正上方=0°不歪头）
+    const dt = Math.min(L.dt || 0, .05);
+    const RM = L.roam || (L.roam = {});
+    const base = MODULES.map((m, i) => {
+      const a = (m.angle + swim * 10 * Math.sin(t * .22 + i * 1.7)) * Math.PI / 180;
+      const rr = 1 + swim * .07 * Math.sin(t * .3 + i);
+      return {x: W / 2 + Math.cos(a) * rx * rr, y: cy + Math.sin(a) * ry * rr};
+    });
+    const js = MODULES.map((m, i) => {
+      const rm = RM[m.id] || (RM[m.id] = {x: 0, y: 0, vx: 4, vy: 0, ang: Math.random() * 6.28, spd: 6, turnAt: 0, targetAng: 0, targetSpd: 7});
+      if (swim) {
+        if (t >= rm.turnAt) { rm.turnAt = t + 5 + Math.random() * 7; rm.targetAng = Math.random() * Math.PI * 2; rm.targetSpd = 1.8 + Math.random() * 4; }   // 随机掉头（十三轮再放缓：速度上限 7.2→5.8，转向间隔更长）
+        let da = rm.targetAng - rm.ang; da = Math.atan2(Math.sin(da), Math.cos(da));
+        rm.ang += clamp(da, -.55 * dt, .55 * dt);   // 受限角速度（0.75→0.55，转弯更柔）
+        rm.spd += (rm.targetSpd - rm.spd) * Math.min(1, dt * .5);
+        rm.vx += (Math.cos(rm.ang) * rm.spd - rm.vx) * Math.min(1, dt * .8);
+        rm.vy += (Math.sin(rm.ang) * rm.spd * .4 - rm.vy) * Math.min(1, dt * .8);
+        rm.x += rm.vx * dt; rm.y += rm.vy * dt;
+        // 弱归心弹簧（帧率无关）：水母可自主漂浮，偏离远了才慢慢拉回，线不会无限拉长
+        rm.vx += -rm.x * .1 * dt; rm.vy += -rm.y * .1 * dt;
+        // 最大漂浮范围：椭圆半径 65%，超过后平滑减速（不瞬间反弹，丝滑不卡顿）
+        const maxOx = rx * .65, maxOy = ry * .65;
+        if (rm.x > maxOx) { rm.x = maxOx; rm.vx *= .55; }
+        else if (rm.x < -maxOx) { rm.x = -maxOx; rm.vx *= .55; }
+        if (rm.y > maxOy) { rm.y = maxOy; rm.vy *= .55; }
+        else if (rm.y < -maxOy) { rm.y = -maxOy; rm.vy *= .55; }
       }
-      const dv = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
-      if (dv < 0) {
-        A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv;
-        const dv2 = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
-        if (dv2 < 18) { const add = (18 - dv2) / 2; A.rm.vx += nx * add; A.rm.vy += ny * add; B.rm.vx -= nx * add; B.rm.vy -= ny * add; }
-      }
-    }
-  }
-  // 主神经（光球↔各水母的神经丝）也是实体：游进别的神经丝走廊=被碰到——沿法线弹出+速度反射，
-  // 并把漫游目标角刷新到反弹方向（否则转向加速度会立刻把它压回神经丝上反复蹭线）；
-  // 自己的神经丝终点在自己身上，跳过。神经丝画的是微弯贝塞尔，直线段近似误差 ≤13px 在碰撞阈值内
-  const ocx = 0, ocy = wcy, jsz = narrow ? 92 : clamp(W * .12, 120, 184);
-  const abs = js.map(({rm, bx, by}) => [bx + rm.x, by + rm.y]);
-  for (let i = 0; i < js.length; i++) {
-    const rm = js[i].rm;
-    if (rm.att) continue;   // 吸附态零碰撞（十三轮令的显式化：坐标实时写回后防推挤与跟随点打架）
-    if (t < (rm.noHit || 0)) continue;   // 免疫期：脱钩后的惯性飘逸期跳过走廊反弹（防连环弹=抖动）
-    for (let k = 0; k < js.length; k++) {
-      if (k === i) continue;
-      const ex = abs[k][0] - ocx, ey = abs[k][1] - ocy, elen = Math.hypot(ex, ey) || 1;
-      const ux = ex / elen, uy = ey / elen;
-      const proj = clamp((abs[i][0] - ocx) * ux + (abs[i][1] - ocy) * uy, 0, elen);   // 线上最近点（含两端）
-      const px = ocx + ux * proj, py = ocy + uy * proj;
-      const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .62 + 22;
-      if (d > 0.01 && d < minD) {
-        const nx = dx / d, ny = dy / d, push = Math.min(8, minD - d);   // 限速渐推（防跳变）
-        rm.x += nx * push; rm.y += ny * push; abs[i][0] += nx * push; abs[i][1] += ny * push;
-        const vn = rm.vx * nx + rm.vy * ny;
-        if (vn < 0) { const vAbs = Math.max(9, -vn); rm.vx += nx * (vAbs + vn); rm.vy += ny * (vAbs + vn); rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; }   // 轻擦神经丝也有可见反弹（法向反射速度保底 9px/s）
-      }
-    }
-  }
-  // 光球本体也是实体（用户令八轮）：水母压进光球光域=沿径向弹出+速度反射，与走廊同款最小反弹
-  js.forEach(({rm, bx, by}) => {
-    if (rm.att || t < (rm.noHit || 0)) return;   // 吸附态零碰撞
-    const ax2 = bx + rm.x, ay2 = by + rm.y;
-    const dx = ax2 - ocx, dy = ay2 - ocy, d = Math.hypot(dx, dy), minD = res.orb.s * .38 + jsz * .28;
-    if (d > .01 && d < minD) {
-      const nx = dx / d, ny = dy / d, push = Math.min(8, minD - d);   // 限速渐推（防跳变）
-      rm.x += nx * push; rm.y += ny * push;
-      const vn = rm.vx * nx + rm.vy * ny;
-      if (vn < 0) { const vAbs = Math.max(10, -vn); rm.vx += nx * (vAbs + vn); rm.vy += ny * (vAbs + vn); rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 2; }
-    }
-  });
-  // 吸附互斥（用户令十一轮）：鼠标同时靠近多只时只吸最近的一只——否则多只一起贴到鼠标上完全重叠。
-  // 十二轮修正：已吸住的水母显示位置=跟随点（漫游坐标已冻结），判定要用真实位置且独占——
-  // 否则吸着 A 走远后"最近"会变成别的近处水母 B，B 也被吸入=互斥失效
-  let attCandidate = null, attDist = 1e9, attHeld = false;
-  if (L.smx != null) MODULES.forEach((m, i) => {
-    const {rm, bx, by} = js[i];
-    if (rm.att) { attHeld = true; attCandidate = m.id; return; }
-    if (attHeld) return;
-    const d = Math.hypot(L.smx - (bx + rm.x), L.smy - (by + rm.y));
-    if (d < attDist) { attDist = d; attCandidate = m.id; }
-  });
-  const selMod = st === 'hub' ? null : L.mod;   // M2：进模块后选中的水母放大点亮，其余变暗常驻（不消失）
-  MODULES.forEach((m, i) => {
-    const {rm, bx, by} = js[i];
-    // 左右摆动严格对称 + 姿态随移动方向动态倾倒；惯性余波（脱钩后 calmT 窗口内摆幅渐大渐收）；
-    // 生动感（10-18 二轮）：摆幅耦合漫游速度——游得快摆得欢（静止 5 → 全速 ~10.5），游弋像"划水"而非匀速漂
-    const swayAmp = 5 + Math.min(5.5, Math.abs(rm.vx) * .38) + (rm.calmT && t < rm.calmT ? 5 * (rm.calmT - t) / 2.2 : 0);
-    const velTilt = clamp(rm.vx * .9, -11, 11);
-    const jsz0 = narrow ? 92 : clamp(W * .12, 120, 184);
-    const sel = m.id === selMod;
-    const jj = {x: bx + rm.x, y: by + rm.y + swim * 14 * Math.sin(t * .8 + i * 2.1), s: jsz0 * (sel ? 1.18 : 1), o: sel || st === 'hub' ? 1 : .8,
-      tilt: swim * (swayAmp * Math.sin(t * 1.35 + i * 1.3) + velTilt), pull: 0, calm: rm.calmT && t < rm.calmT, vx: rm.vx, vy: rm.vy};
-    // 鼠标交互（用户令八轮重设计 → 星图 10-18 引力场扩容）：中心强吸附——水母头部吸在鼠标箭头上
-    // 整体跟随漂浮，随移动方向明显倾斜；只有鼠标快速甩动(>950px/s)才拉脱带惯性飘逸；
-    // 10-18 二轮「吸附失灵」修复：咬合改双规则——进圈咬合，或已进过大圈且鼠标保持低速则从外圈直接贴上
-    //（解决引力收拢途中快速掠过咬合圈=永远咬不上的时序窗口）；跟随速度回写 rm.spd（脱钩顺滑起步）。
-    // 注意：L.smx/L.smy 是世界坐标（Scene 里从屏幕投影而来），甩动/低速阈值仍按屏幕像素判——任何缩放下手感一致
-    if (L.smx != null) {
-      // 六轮定案「拖动优先」：吸附中的水母进入 UI 不断开——被携带的水母 pointer-events:none
-      // （Scene 里切换），点击穿透到下方按钮/输入框，拖动全程不被 UI 打断；
-      // uiHover 只阻止"新咬合"与外圈牵引（防止水母在你打字/点按钮时被吸过来）
-      const mvSpdNow = Math.hypot(L.mvx || 0, L.mvy || 0);
-      const adx = L.smx - jj.x, ady = L.smy - jj.y, add = Math.hypot(adx, ady);
-      const ATT_R = jj.s * .7, NEAR_R = jj.s * 1.0;
-      const PULL_R = Math.max(120, jj.s * .85);
-      rm.near = rm.near && Math.hypot(L.smx - (rm.ax ?? jj.x), L.smy - (rm.ay ?? jj.y)) < NEAR_R * 1.4;
-      if (!rm.att && !L.uiHover && add < NEAR_R && t >= (rm.noPull || 0)) rm.near = true;
-      if (!rm.att && !L.uiHover && m.id === attCandidate && t >= (rm.noPull || 0)
-          && (add < ATT_R || (rm.near && mvSpdNow < 450))) { rm.att = true; rm.ax = null; rm.ay = null; rm.near = false; }
-      if (rm.att && Math.hypot(L.smx - (rm.ax ?? jj.x), L.smy - (rm.ay ?? jj.y)) > 300) {
-        // 幽灵吸附保护：切视图/长时间断流后跟随点已远离鼠标=就地安静脱钩（吸附位置实时写回，不会跳变）
-        rm.att = false; rm.ax = null; rm.ay = null; rm.noPull = t + 1.5;
-      }
-      if (rm.att) {
-        const detach = (nx, ny) => {   // 脱钩：位置写回漫游坐标；反弹=给定法线初速，甩脱=拖动惯性延续（卸力飘逸）
-          rm.att = false; rm.ax = null; rm.ay = null;
-          rm.x = jj.x - bx; rm.y = jj.y - by;
-          const mvSpd = Math.hypot(L.mvx || 0, L.mvy || 0);
-          if (nx != null) { const bs = 26; rm.vx = nx * bs; rm.vy = ny * bs * .8; }
-          else if (mvSpd > 40) {
-            const dr = Math.min(55, Math.max(8, mvSpd * .02));
-            rm.ang = Math.atan2(L.mvy, L.mvx); rm.vx = Math.cos(rm.ang) * dr; rm.vy = Math.sin(rm.ang) * dr * .45;
-            rm.spd = dr; rm.targetSpd = 3;
-          }
-          else { rm.vx = (L.mvx || 0) * .012; rm.vy = (L.mvy || 0) * .012; }
-          rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang; rm.turnAt = t + 2.6;
-          rm.calmT = t + 2.2; rm.noHit = t + 1.2;
-          rm.noPull = t + 2.8;   // 引力免疫（用户令十五轮）：甩脱瞬间鼠标还在身边，外圈引力会立即拽回=「弹回去」——免疫期内安静飘走
-          jj.x = bx + rm.x; jj.y = by + rm.y;
-        };
-        if (mvSpdNow > 950) detach(null, null);   // 快速甩动才拉脱（距离不再脱钩，慢移一直吸着）
-        else {
-          const k = Math.min(1, (L.dt || 0) * 8.5);   // 强吸附（10-18 二轮再加强 6.5→8.5）：快速拖动头部不脱节
-          rm.ax = rm.ax == null ? jj.x : rm.ax + (L.smx - rm.ax) * k;
-          rm.ay = rm.ay == null ? jj.y : rm.ay + (L.smy - rm.ay) * k;
-          jj.x = rm.ax; jj.y = rm.ay + jj.s * .35;   // 头部吸在鼠标箭头上（头=中心上方 s*.35）
-          jj.pull = 1; jj.att = true;
-          rm.spd = Math.min(9, mvSpdNow * .012); rm.targetSpd = Math.min(4, mvSpdNow * .008);   // 拖势写回漫游速度：脱钩顺滑起步
-          // 拖动零碰撞（用户令十三轮）：吸附优先级最高，不被走廊/光球/边界弹脱——
-          // 主页视野边缘软限制（clamp 住不脱钩），游弋时的碰撞秩序完整保留
-          const PAD = 60;
-          if (jj.x < -W / 2 + PAD) jj.x = -W / 2 + PAD; else if (jj.x > W / 2 - PAD) jj.x = W / 2 - PAD;
-          if (jj.y < -H / 2 + PAD - 10) jj.y = -H / 2 + PAD - 10; else if (jj.y > H / 2 - PAD + 10) jj.y = H / 2 - PAD + 10;
-          rm.x = jj.x - bx; rm.y = jj.y - by;   // 吸附位置实时写回漫游坐标：任何脱钩路径不再跳回吸附前旧位置
+      return {rm, bx: base[i].x, by: base[i].y};
+    });
+    js.forEach(({rm, bx, by}) => {   // 边界反弹（按绝对位置）；吸附态跳过（坐标已实时写回跟随点，屏幕边在显示层软拦）
+      if (rm.att) return;
+      const ax = bx + rm.x, ay = by + rm.y;
+      if (ax < 100) { rm.x = 100 - bx; rm.vx = Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
+      if (ax > W - 100) { rm.x = W - 100 - bx; rm.vx = -Math.abs(rm.vx); rm.ang = Math.PI - rm.ang; }
+      if (ay < 90) { rm.y = 90 - by; rm.vy = Math.abs(rm.vy); rm.ang = -rm.ang; }
+      if (ay > H - 90) { rm.y = H - 90 - by; rm.vy = -Math.abs(rm.vy); rm.ang = -rm.ang; }
+    });
+    for (let i = 0; i < js.length; i++) for (let k = i + 1; k < js.length; k++) {   // 成对相撞：互换法向速度+位置各退一半重叠
+      const A = js[i], B = js[k];
+      if (t < (A.rm.noHit || 0) || t < (B.rm.noHit || 0)) continue;   // 免疫期（刚脱钩的惯性飘逸不被立刻再弹）
+      if (A.rm.att || B.rm.att) continue;   // 吸附态不参与碰撞（拖动零碰撞）
+      const dx = (A.bx + A.rm.x) - (B.bx + B.rm.x), dy = (A.by + A.rm.y) - (B.by + B.rm.y);
+      const d = Math.hypot(dx, dy), jszD = narrow ? 92 : clamp(W * .12, 120, 184), minD = jszD * .92, softD = jszD * 1.12;
+      if (d > 0.01 && d < softD) {
+        // 气球式碰开：硬碰撞区强力推开 + 外围软排斥区轻触即弹，挨着就弹开不重叠
+        const nx = dx / d, ny = dy / d;
+        if (d < minD) {
+          const push = Math.min(16, (minD - d) / 2);
+          A.rm.x += nx * push; A.rm.y += ny * push; B.rm.x -= nx * push; B.rm.y -= ny * push;
+        } else {
+          const soft = (softD - d) / (softD - minD) * 2.5;
+          A.rm.x += nx * soft; A.rm.y += ny * soft; B.rm.x -= nx * soft; B.rm.y -= ny * soft;
         }
-      } else if (!L.uiHover && add < PULL_R && add > 2 && t >= (rm.noPull || 0)) {
-        // 外圈引力：中心最强向外渐弱（u^1.8）——显示层小偏移（即时靠拢感）+ 真牵引漫游速度
-        // （稳态 ≈ acc/0.8，外圈慢近圈快）：鼠标放着不动水母也会被慢慢吸上；候选加成 1.6x
-        const u = 1 - add / PULL_R;
-        const f = Math.pow(u, 1.8) * 26;
-        jj.x += adx / add * f; jj.y += ady / add * f; jj.s *= 1 - u * .16; jj.pull = u;
-        const acc = 30 * Math.pow(u, 1.6) * (m.id === attCandidate ? 1.6 : 1);
-        rm.vx += adx / add * acc * (L.dt || 0); rm.vy += ady / add * acc * (L.dt || 0);
+        const dv = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
+        if (dv < 0) {
+          A.rm.vx -= nx * dv; A.rm.vy -= ny * dv; B.rm.vx += nx * dv; B.rm.vy += ny * dv;
+          const dv2 = (A.rm.vx - B.rm.vx) * nx + (A.rm.vy - B.rm.vy) * ny;
+          if (dv2 < 18) { const add = (18 - dv2) / 2; A.rm.vx += nx * add; A.rm.vy += ny * add; B.rm.vx -= nx * add; B.rm.vy -= ny * add; }
+        }
       }
-    } else if (rm.att) { rm.att = false; rm.ax = null; rm.ay = null; rm.noPull = t + 1.5; }   // 鼠标断流：就地安静脱钩（位置已实时同步，不跳回）
-    jj.tilt = clamp(jj.tilt, -16, 16);   // 生动感（10-18 二轮）：限幅 26→16——大幅侧倾+旋转叠加时"像翻车"，收着更像活物
-    res.jelly[m.id] = jj;
-  });
-  // —— 内容环（module/note stage，M2 多层同心展开）——
-  if (st !== 'hub' && L.items) {
-    const mi = MODULES.findIndex(mm => mm.id === L.mod);
-    const a0 = bases[mi < 0 ? 0 : mi].a;   // 扇区中心=选中水母的轨道角（含漂移）：内容环跟水母同组微漂
-    const anc = L.ancLevels || [];
-    const ancShown = Math.min(anc.length, 2);   // 深链折叠：最多两级祖先同屏（同旧 zd 截断哲学）
-    const RX = k => rx + 320 + k * 300, RY = k => ry + 250 + k * 250;   // 环 k（0=第二环）：卡宽 160+触须空隙的节奏
-    const arc = (n, k) => {   // 弧线排布：以 a0 为中心、弧长间距 62px；单圈超过 ~292° 后盘旋到更外一圈
-      const out = [];
-      const step = Math.min(.9, 62 / Math.max(RX(k), 220));
-      const maxPer = Math.max(3, Math.floor(5.1 / step));
-      for (let i = 0; i < n; i++) {
-        const band = Math.floor(i / maxPer), j = i % maxPer;
-        const cnt = Math.min(maxPer, n - band * maxPer);
-        const a = a0 - step * (cnt - 1) / 2 + j * step;
-        out.push({x: Math.cos(a) * RX(k + band), y: wcy + Math.sin(a) * RY(k + band)});
-      }
-      return out;
-    };
-    res.acols = null;
-    const zchain = L.zonePath || [];
-    for (let k = 0; k < ancShown; k++) {
-      const cards = anc[k];
-      if (!cards?.length) continue;
-      const pos = arc(cards.length, k);
-      const pz = zchain[k + 1]?.zone;
-      const pi = Math.max(0, cards.findIndex(c => c.path === pz));
-      (res.acols ||= [])[k] = cards.map((c, i) => ({...pos[i], s: 1, dim: i !== pi, path: i === pi}));
     }
-    if (res.acols) res.acols = res.acols.filter(Boolean);   // 空层级跳过后防稀疏数组（map 会漏位崩下游）
-    const curK = ancShown;
-    res.fan = {items: arc(L.items.length, curK), scale: 1, ring: curK};
-    // 自动取景点（Home 相机用）：当前环中段沿扇区方向、缩到一眼看全整环
-    res.ringInfo = {a0, fx: RX(curK) * .52, fy: RY(curK) * .58, z: clamp(Math.min(W, H) / 1500, .48, .92)};
+    // 主神经（光球↔各水母的神经丝）也是实体：游进别的神经丝走廊=被碰到——沿法线弹出+速度反射，
+    // 并把漫游目标角刷新到反弹方向（否则转向加速度会立刻把它压回神经丝上反复蹭线）；
+    // 自己的神经丝终点在自己身上，跳过。神经丝画的是微弯贝塞尔，直线段近似误差 ≤13px 在碰撞阈值内
+    const ocx = W / 2, ocy = cy, jsz = narrow ? 92 : clamp(W * .12, 120, 184);
+    const abs = js.map(({rm, bx, by}) => [bx + rm.x, by + rm.y]);
+    for (let i = 0; i < js.length; i++) {
+      const rm = js[i].rm;
+      if (rm.att) continue;   // 吸附态零碰撞（十三轮令的显式化：坐标实时写回后防推挤与跟随点打架）
+      if (t < (rm.noHit || 0)) continue;   // 免疫期：脱钩后的惯性飘逸期跳过走廊反弹（防连环弹=抖动）
+      for (let k = 0; k < js.length; k++) {
+        if (k === i) continue;
+        const ex = abs[k][0] - ocx, ey = abs[k][1] - ocy, elen = Math.hypot(ex, ey) || 1;
+        const ux = ex / elen, uy = ey / elen;
+        const proj = clamp((abs[i][0] - ocx) * ux + (abs[i][1] - ocy) * uy, 0, elen);   // 线上最近点（含两端）
+        const px = ocx + ux * proj, py = ocy + uy * proj;
+        const dx = abs[i][0] - px, dy = abs[i][1] - py, d = Math.hypot(dx, dy), minD = jsz * .62 + 22;
+        if (d > 0.01 && d < minD) {
+          const nx = dx / d, ny = dy / d, push = Math.min(8, minD - d);   // 限速渐推（防跳变）
+          rm.x += nx * push; rm.y += ny * push; abs[i][0] += nx * push; abs[i][1] += ny * push;
+          const vn = rm.vx * nx + rm.vy * ny;
+          if (vn < 0) { const vAbs = Math.max(9, -vn); rm.vx += nx * (vAbs + vn); rm.vy += ny * (vAbs + vn); rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 3; }   // 轻擦神经丝也有可见反弹（法向反射速度保底 9px/s）
+        }
+      }
+    }
+    // 光球本体也是实体（用户令八轮）：水母压进光球光域=沿径向弹出+速度反射，与走廊同款最小反弹
+    js.forEach(({rm, bx, by}) => {
+      if (rm.att || t < (rm.noHit || 0)) return;   // 吸附态零碰撞
+      const ax2 = bx + rm.x, ay2 = by + rm.y;
+      const dx = ax2 - ocx, dy = ay2 - ocy, d = Math.hypot(dx, dy), minD = res.orb.s * .38 + jsz * .28;
+      if (d > .01 && d < minD) {
+        const nx = dx / d, ny = dy / d, push = Math.min(8, minD - d);   // 限速渐推（防跳变）
+        rm.x += nx * push; rm.y += ny * push;
+        const vn = rm.vx * nx + rm.vy * ny;
+        if (vn < 0) { const vAbs = Math.max(10, -vn); rm.vx += nx * (vAbs + vn); rm.vy += ny * (vAbs + vn); rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang + (Math.random() - .5) * .8; rm.turnAt = t + 2 + Math.random() * 2; }
+      }
+    });
+    // 吸附互斥（用户令十一轮）：鼠标同时靠近多只时只吸最近的一只——否则多只一起贴到鼠标上完全重叠。
+    // 十二轮修正：已吸住的水母显示位置=跟随点（漫游坐标已冻结），判定要用真实位置且独占——
+    // 否则吸着 A 走远后"最近"会变成别的近处水母 B，B 也被吸入=互斥失效
+    let attCandidate = null, attDist = 1e9, attHeld = false;
+    if (L.smx != null) MODULES.forEach((m, i) => {
+      const {rm, bx, by} = js[i];
+      if (rm.att) { attHeld = true; attCandidate = m.id; return; }
+      if (attHeld) return;
+      const d = Math.hypot(L.smx - (bx + rm.x), L.smy - (by + rm.y));
+      if (d < attDist) { attDist = d; attCandidate = m.id; }
+    });
+    MODULES.forEach((m, i) => {
+      const {rm, bx, by} = js[i];
+      // 左右摆动严格对称 + 姿态随移动方向动态倾倒；惯性余波（脱钩后 calmT 窗口内摆幅渐大渐收）；
+      // 生动感（10-18 二轮）：摆幅耦合漫游速度——游得快摆得欢（静止 5 → 全速 ~10.5），游弋像"划水"而非匀速漂
+      const swayAmp = 5 + Math.min(5.5, Math.abs(rm.vx) * .38) + (rm.calmT && t < rm.calmT ? 5 * (rm.calmT - t) / 2.2 : 0);
+      const velTilt = clamp(rm.vx * .9, -11, 11);
+      const jsz0 = narrow ? 92 : clamp(W * .12, 120, 184);
+      const jj = {x: bx + rm.x, y: by + rm.y + swim * 14 * Math.sin(t * .8 + i * 2.1), s: jsz0, o: 1,
+        tilt: swim * (swayAmp * Math.sin(t * 1.35 + i * 1.3) + velTilt), pull: 0, calm: rm.calmT && t < rm.calmT, vx: rm.vx, vy: rm.vy};
+      // 鼠标交互（用户令八轮重设计 → 星图 10-18 引力场扩容）：中心强吸附——水母头部吸在鼠标箭头上
+      // 整体跟随漂浮，随移动方向明显倾斜；只有鼠标快速甩动(>950px/s)才拉脱带惯性飘逸；
+      // 10-18 二轮「吸附失灵」修复：咬合改双规则——进圈 s*.95 咬合，或已进过 s*1.6 大圈且鼠标保持
+      // 低速（<450px/s）则从外圈直接贴上（解决引力收拢途中快速掠过 s*.95 圈=永远咬不上的时序窗口）；
+      // 跟随速度 6.5→8.5/秒（快速拖动时头不脱节），同时把跟随速度回写 rm.spd（脱钩后漫游先顺着拖势滑行，
+      // 原版 spd 还停在吸附前的旧值=脱钩瞬间"顿一下再起步"的滞涩感来源）。
+      // 引力圈 max(240, s*1.7)、真牵引漫游速度（外圈慢近圈快）不变：鼠标静止放着也会被慢慢吸上
+      if (L.smx != null) {
+        // 六轮定案「拖动优先」：吸附中的水母进入 UI 不断开——被携带的水母 pointer-events:none
+        // （Scene 里切换），点击穿透到下方按钮/输入框，拖动全程不被 UI 打断；
+        // uiHover 只阻止"新咬合"与外圈牵引（防止水母在你打字/点按钮时被吸过来）
+        const mvSpdNow = Math.hypot(L.mvx || 0, L.mvy || 0);
+        const adx = L.smx - jj.x, ady = L.smy - jj.y, add = Math.hypot(adx, ady);
+        const ATT_R = jj.s * .7, NEAR_R = jj.s * 1.0;
+        const PULL_R = Math.max(120, jj.s * .85);
+        rm.near = rm.near && Math.hypot(L.smx - (rm.ax ?? jj.x), L.smy - (rm.ay ?? jj.y)) < NEAR_R * 1.4;
+        if (!rm.att && !L.uiHover && add < NEAR_R && t >= (rm.noPull || 0)) rm.near = true;
+        if (!rm.att && !L.uiHover && m.id === attCandidate && t >= (rm.noPull || 0)
+            && (add < ATT_R || (rm.near && mvSpdNow < 450))) { rm.att = true; rm.ax = null; rm.ay = null; rm.near = false; }
+        if (rm.att && Math.hypot(L.smx - (rm.ax ?? jj.x), L.smy - (rm.ay ?? jj.y)) > 300) {
+          // 幽灵吸附保护：切视图/长时间断流后跟随点已远离鼠标=就地安静脱钩（吸附位置实时写回，不会跳变）
+          rm.att = false; rm.ax = null; rm.ay = null; rm.noPull = t + 1.5;
+        }
+        if (rm.att) {
+          const detach = (nx, ny) => {   // 脱钩：位置写回漫游坐标；反弹=给定法线初速，甩脱=拖动惯性延续（卸力飘逸）
+            rm.att = false; rm.ax = null; rm.ay = null;
+            rm.x = jj.x - bx; rm.y = jj.y - by;
+            const mvSpd = Math.hypot(L.mvx || 0, L.mvy || 0);
+            if (nx != null) { const bs = 26; rm.vx = nx * bs; rm.vy = ny * bs * .8; }
+            else if (mvSpd > 40) {
+              const dr = Math.min(55, Math.max(8, mvSpd * .02));
+              rm.ang = Math.atan2(L.mvy, L.mvx); rm.vx = Math.cos(rm.ang) * dr; rm.vy = Math.sin(rm.ang) * dr * .45;
+              rm.spd = dr; rm.targetSpd = 3;
+            }
+            else { rm.vx = (L.mvx || 0) * .012; rm.vy = (L.mvy || 0) * .012; }
+            rm.ang = Math.atan2(rm.vy, rm.vx); rm.targetAng = rm.ang; rm.turnAt = t + 2.6;
+            rm.calmT = t + 2.2; rm.noHit = t + 1.2;
+            rm.noPull = t + 2.8;   // 引力免疫（用户令十五轮）：甩脱瞬间鼠标还在身边，外圈引力会立即拽回=「弹回去」——免疫期内安静飘走
+            jj.x = bx + rm.x; jj.y = by + rm.y;
+          };
+          if (mvSpdNow > 950) detach(null, null);   // 快速甩动才拉脱（距离不再脱钩，慢移一直吸着）
+          else {
+            const k = Math.min(1, (L.dt || 0) * 8.5);   // 强吸附（10-18 二轮再加强 6.5→8.5）：快速拖动头部不脱节
+            rm.ax = rm.ax == null ? jj.x : rm.ax + (L.smx - rm.ax) * k;
+            rm.ay = rm.ay == null ? jj.y : rm.ay + (L.smy - rm.ay) * k;
+            jj.x = rm.ax; jj.y = rm.ay + jj.s * .35;   // 头部吸在鼠标箭头上（头=中心上方 s*.35）
+            jj.pull = 1; jj.att = true;
+            rm.spd = Math.min(9, mvSpdNow * .012); rm.targetSpd = Math.min(4, mvSpdNow * .008);   // 拖势写回漫游速度：脱钩顺滑起步
+            // 拖动零碰撞（用户令十三轮：碰撞反弹影响手感、角落水母拉不出）：
+            // 被吸着时吸附优先级最高，不被走廊/光球/边界弹脱——屏幕边缘软限制（clamp 住不脱钩），
+            // 游弋时的碰撞秩序（成对/走廊/光球反弹）完整保留
+            const PAD = 60;
+            if (jj.x < PAD) jj.x = PAD; else if (jj.x > W - PAD) jj.x = W - PAD;
+            if (jj.y < PAD - 10) jj.y = PAD - 10; else if (jj.y > H - PAD + 10) jj.y = H - PAD + 10;
+            rm.x = jj.x - bx; rm.y = jj.y - by;   // 吸附位置实时写回漫游坐标：断流/切视图等任何脱钩路径不再跳回吸附前旧位置（拖开后回挡路原位的真根）
+          }
+        } else if (!L.uiHover && add < PULL_R && add > 2 && t >= (rm.noPull || 0)) {
+          // 外圈引力：中心最强向外渐弱（u^1.8）——显示层小偏移（即时靠拢感）+ 真牵引漫游速度
+          // （稳态 ≈ acc/0.8，外圈慢近圈快）：鼠标放着不动水母也会被慢慢吸上；候选加成 1.6x。
+          // 六轮：撤掉墙外带门控——吸附半径(≥114)大于墙边距(90~100)，水母未及墙就转吸附态、
+          // 吸附态走位置钳制（PAD，无速度对拉不抖），靠墙区域不再有"拉不动"的排斥区
+          const u = 1 - add / PULL_R;
+          const f = Math.pow(u, 1.8) * 26;
+          jj.x += adx / add * f; jj.y += ady / add * f; jj.s *= 1 - u * .16; jj.pull = u;
+          const acc = 30 * Math.pow(u, 1.6) * (m.id === attCandidate ? 1.6 : 1);
+          rm.vx += adx / add * acc * (L.dt || 0); rm.vy += ady / add * acc * (L.dt || 0);
+        }
+      } else if (rm.att) { rm.att = false; rm.ax = null; rm.ay = null; rm.noPull = t + 1.5; }   // 鼠标断流：就地安静脱钩（位置已实时同步，不跳回）
+      jj.tilt = clamp(jj.tilt, -16, 16);   // 生动感（10-18 二轮）：限幅 26→16——大幅侧倾+旋转叠加时"像翻车"，收着更像活物
+      res.jelly[m.id] = jj;
+    });
+  } else if (narrow) {
+    res.orb = {x: 40, y: 156, s: 86};
+    MODULES.forEach((m, i) => {
+      const sel = m.id === L.mod, k = slotOf(L.mod, m.id);
+      res.jelly[m.id] = {x: 104 + k * (W - 136) / 4, y: 152 + swim * 4 * Math.sin(t * .9 + i * 2), s: sel ? 76 : 54, o: sel ? 1 : .55, tilt: swim * 3 * Math.sin(t * .6 + i)};
+    });
+    const n = L.items.length, gap = clamp((H - 330) / Math.max(n - 1, 1), 22, 54);
+    res.fan = {x: 34, y0: 286, gap};
+  } else {
+    const ox = Math.max(124, W * .09), cy = H * .53;
+    res.orb = {x: ox, y: cy, s: 178};
+    const colX = ox + 158, gap = Math.min(122, (H - 150) / 5);
+    MODULES.forEach((m, i) => {
+      const sel = m.id === L.mod, k = slotOf(L.mod, m.id);
+      // 第二形态（点击水母进模块后，用户令）：摆动/漂浮幅度降到 25%——"不能乱动"；零均值对称摆
+      const F2 = .25;
+      const jj = {x: colX + (sel ? 16 : 0) + swim * 12 * Math.sin(t * .26 + i * 1.7) * F2, y: cy + (k - 2) * gap + swim * 9 * Math.sin(t * .9 + i * 2) * F2, s: sel ? 128 : 92, o: sel ? 1 : .6,
+        tilt: (swim * 3 * Math.sin(t * .6 + i) + swim * 4 * Math.cos(t * .26 + i * 1.7)) * F2, pull: 0};
+      res.jelly[m.id] = jj;
+    });
+    // 伞状条目以右侧分析栏为基准排在它左边约 90px 处（条目最宽约 270px），触须拉长、画面左右均衡；
+    // 模块层和打开笔记后位置相同，右侧栏滑入时伞不跳动。
+    // 长清单不压缩间距：固定间距往下排，超出视口的部分用滚轮平移（panY），像一张往下无限延伸的画布。
+    const panelLeft = W - clamp(W * .30, 360, 440) - 44;
+    const n = L.items.length;
+    // 清单垂直间距自适应（用户令 10-15：最后一层内容默认居中放置）：短清单保持 80px 节奏，
+    // 长清单（如服务舱 13 项）压缩到 42~80px 让整列垂直居中进一屏——不再从顶部起排靠滚轮找
+    const fgap = clamp((H - 300) / Math.max(n - 1, 1), 42, 80);
+    const selOpen = L.stage === 'note';
+    // kb 目录钻取（宽屏）：每一层完整复刻"水母层"语法——选中卡调换到中间放大当该列主角（同选中水母居中），
+    // 同层兄弟卡保持原尺寸、变暗排在上下（同未选水母 o=.6；深列放不下才缩），下一层在右侧下一个槽位
+    // 按原尺寸完整展开（同点知识库后生出的那层）；连线=上一列选中卡右缘→下一层各卡，逐列接棒。
+    // 打开笔记时：整个构图（光球+水母列+祖先列+文件列）作为同一刚体向左平移+整体缩小给详情页让位——
+    // 结构原样、无人消失、无重排，ESC 原样放大还原。
+    const zchain = L.zonePath || [];
+    const zdRaw = zchain.length > 1 ? zchain.length - 1 : 0;   // kb 与 services 都走层级链（zonePath 只有这两个模块有值）
+    const zd = Math.min(zdRaw, 2);
+    // 列间距 240：卡宽 160+触须空隙——间距不足时上一列卡片右缘压到下一列起点，
+    // 触须被迫向左折回交织（核心服务→工作站那层"线条扭在一起"的根源）。
+    // 水母层→首列与其他层同节奏：标签移到水母正下方（不占连线路径），触须从伞体右缘+6px 出发，
+    // 伞体右缘 → 首列 = 80px（76 线）——不再隔着一个 132~176px 宽的标签（旧观感总间距 ~286px）。
+    // 锚点用当帧水母真实位置（含游弋漂移）——列跟水母同组微漂，线长恒定
+    const sjx = L.mod && res.jelly[L.mod] ? res.jelly[L.mod] : null;
+    const bodyRight = (sjx ? sjx.x : colX + 16) + (sjx ? sjx.s : 128) * .5;
+    const fanBase = Math.min(bodyRight + 80, panelLeft - 280);
+    const SX = [fanBase, fanBase + 240, fanBase + 480];
+    const fit = !zd || SX[zd] + 300 <= W - 20;   // 300=内容卡实际最宽(~310 含徽章)，层级整体离屏右缘留 20px 呼吸
+    const span = Math.max(0, n - 1) * fgap;
+    // 清单顶部只让位顶栏（水母已置顶压在内容上，清单可延伸到水母下方——居中优先）
+    let x = fanBase, y0 = Math.max(cy - span / 2, 90), fg2 = fgap, fsc = 1;
+    res.acols = null;
+    if (zd && fit) {
+      x = SX[zd];
+      res.acols = (L.ancLevels || []).slice(0, zd).map((cards, k) => {
+        const pz = zchain[k + 1]?.zone;
+        const pi = Math.max(0, cards.findIndex(c => c.path === pz));
+        const pos = new Array(cards.length);
+        const nSib = cards.length - 1;
+        const sg = 80;   // 祖先列兄弟卡与当前列同款统一间距
+        const sd = Math.min(1, sg / 46);   // 兄弟卡尽量保持原尺寸（文字不缩），只有深列排不下才等比缩
+        let ay = cy - (sg - 8), by = cy + (sg - 8), j = 0;
+        for (let i = 0; i < cards.length; i++) {
+          if (i === pi) { pos[pi] = {x: SX[k], y: cy, s: 1, path: true}; continue; }
+          pos[i] = j % 2 === 0 ? {x: SX[k], y: ay, s: sd, dim: true} : {x: SX[k], y: by, s: sd, dim: true};
+          if (j % 2 === 0) ay -= sg; else by += sg;
+          j++;
+        }
+        return pos;
+      });
+      if (selOpen) {
+        // 整体缩小+向左平移（同一刚体变换）：以光球左缘为锚，把 水母列/祖先列/文件列 一起压缩到详情页左侧。
+        // g 按笔记模式标题收窄后的实际卡宽估（160+边距≈200），面板已收窄让位 → 缩得更少
+        const AX = 125, g = Math.min(1, (panelLeft - 36 - AX) / (SX[zd] - AX + 250));   // 250=笔记态卡宽上限(标题160+徽章)，层级整体与详情栏恒留 36px 不压栏
+        const mx = v => AX + (v - AX) * g;
+        res.noteG = g;
+        res.orb.x = mx(res.orb.x); res.orb.s *= g;
+        for (const id in res.jelly) { const jj = res.jelly[id]; jj.x = mx(jj.x); jj.y = cy + (jj.y - cy) * g; jj.s *= g; }
+        res.acols = res.acols.map(col => col.map(p => p && ({x: mx(p.x), y: cy + (p.y - cy) * g, s: p.s * g, path: p.path, dim: p.dim})));
+        x = mx(x); y0 = cy + (y0 - cy) * g; fg2 = fgap * g; fsc = g;
+      }
+    }
+    res.fan = {x, y0, gap: fg2, scale: fsc, panMax: Math.max(0, y0 + span * fsc + 70 - H)};
   }
   return res;
+}
+
+// 选中的模块排在列的正中间（第 2 格），其余模块按原顺序分列上下，触须从中间向上下对称展开。
+function slotOf(selId, id) {
+  const others = MODULES.filter(m => m.id !== selId).map(m => m.id);
+  const order = [others[0], others[1], selId, others[2], others[3]];
+  const k = order.indexOf(id);
+  return k < 0 ? MODULES.findIndex(m => m.id === id) : k;
 }
 
 function spring(st, target, dt, k = 62) {
@@ -555,7 +605,7 @@ const bez = (p0, p1, p2, p3, u) => { const m = 1 - u; return m * m * m * p0 + 3 
 
 function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zonePath, ancLevels, zone}) {
   const dustRef = useRef(null);
-  const orbRef = useRef(null), jellyRefs = useRef({}), innerRefs = useRef({}), labelRefs = useRef({}), threadRefs = useRef({}), pulseRefs = useRef({}), sceneRef = useRef(null), jellyLayerRef = useRef(null);
+  const orbRef = useRef(null), jellyRefs = useRef({}), innerRefs = useRef({}), labelRefs = useRef({}), threadRefs = useRef({}), pulseRefs = useRef({}), sceneRef = useRef(null);
   const ripRefs = useRef({}), sparkRefs = useRef({}), gravRef = useRef(null);   // 引力可见化：水波纹/吸入光丝/光标视界环
   const itemRefs = useRef([]), fanRefs = useRef([]), fanPulseRefs = useRef([]);
   const aItemRefs = useRef([]), aThreadRefs = useRef([]), aThreadPulseRefs = useRef([]);
@@ -575,24 +625,11 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       L.dt = dt;   // 供水母自由游弋物理积分（targets 内使用）
       if (!L.paused) L.time += dt;
       const t = L.time, since = (now - L.t0) / 1000;
-      // 相机（M1 世界化）：camTgt=控制目标（滚轮/拖拽/自动取景写它），弹簧平滑后写进两个世界层 transform；
-      // L.camView 供各处做屏幕↔世界投影（鼠标/背景星云/小地图）
-      const CS = L.camS || (L.camS = {x: sp(0), y: sp(0), z: sp(1)});
-      const CT = L.camTgt || (L.camTgt = {x: 0, y: 0, z: 1});
-      const camX = spring(CS.x, CT.x, dt, 26), camY = spring(CS.y, CT.y, dt, 26), camZ = spring(CS.z, CT.z, dt, 30);
-      L.camView = {x: camX, y: camY, z: camZ};
-      const wtf = `translate3d(${L.size.w / 2}px,${L.size.h / 2}px,0) scale(${camZ}) translate3d(${-camX}px,${-camY}px,0)`;
-      if (sceneRef.current && sceneRef.current._tf !== wtf) { sceneRef.current._tf = wtf; sceneRef.current.style.transform = wtf; }
-      if (jellyLayerRef.current && jellyLayerRef.current._tf !== wtf) { jellyLayerRef.current._tf = wtf; jellyLayerRef.current.style.transform = wtf; }
-      // 视口裁剪（M3）：世界 AABB 相交测试——屏外卡片不渲染、视频暂停（283 卡全铺开时的性能闸）
-      const inView = (x, y, pad = 240) => Math.abs(x - camX) < L.size.w / camZ / 2 + pad && Math.abs(y - camY) < L.size.h / camZ / 2 + 180;
-      // 景深雾化（M3）：拉远时深环渐隐——环号超出当前缩放可见档的部分按层衰减（远=雾里看花）
-      const fogOf = ring => { const mv = camZ > .75 ? 9 : camZ > .45 ? 4 : 3; return ring > mv ? Math.max(.22, 1 - (ring - mv) * .3) : 1; };
-      // 鼠标（屏幕坐标记录、世界坐标投影，星图 10-21）：速度/甩动阈值按屏幕像素判（任何缩放下手感一致），
-      // 吸附/引力等距离量在世界坐标里算（targets 使用 L.smx/L.smy）。
-      // 缓速跟随点（用户令 10-15 升级）不变：前置预测追逐 + 速度自适应，消除"追不上"与"过冲弹跳"
-      if (L.mx == null) { L.smx = null; L.smxS = null; L.mvx = 0; L.mvy = 0; }
-      else if (L.smxS == null) { L.smxS = L.mx; L.smyS = L.my; L.pmx = L.mx; L.pmy = L.my; L.mvx = 0; L.mvy = 0; }
+      // 鼠标吸引的缓速跟随点（用户令 10-15 升级）：前置预测追逐 + 速度自适应——
+      // 鼠标速度指数平滑后沿速度方向领先一个时距（上限 90px，快移预测多、慢移趋零），
+      // 跟随系数随速度放大（快→跟得紧，慢→绵柔丝滑），从公式上消除"追不上"与"过冲弹跳"
+      if (L.mx == null) { L.smx = null; L.mvx = 0; L.mvy = 0; }
+      else if (L.smx == null) { L.smx = L.mx; L.smy = L.my; L.pmx = L.mx; L.pmy = L.my; L.mvx = 0; L.mvy = 0; }
       else {
         const idt = Math.max(dt, .001);
         const sm = Math.min(1, dt * 9);
@@ -603,9 +640,8 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         const lead = Math.min(90, Math.sqrt(spd) * 2.3);
         const px = L.mx + (spd > 1 ? L.mvx / spd * lead : 0), py = L.my + (spd > 1 ? L.mvy / spd * lead : 0);
         const e = Math.min(1, dt * (1.5 + 2.5 * Math.min(1, spd / 1400)));
-        L.smxS += (px - L.smxS) * e; L.smyS += (py - L.smyS) * e;
+        L.smx += (px - L.smx) * e; L.smy += (py - L.smy) * e;
       }
-      if (L.smxS != null) { L.smx = camX + (L.smxS - L.size.w / 2) / camZ; L.smy = camY + (L.smyS - L.size.h / 2) / camZ; }
       // 姿态专用慢速平滑（用户令九轮）：倾斜角若直接吃鼠标速度，手部微抖=姿态左右抖动；
       // mvxT 用 dt*3 慢一档，倾斜响应柔稳仍有方向感
       if (L.mx != null) {
@@ -613,6 +649,8 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         else L.mvxT += ((L.mvx || 0) - L.mvxT) * Math.min(1, dt * 3);
       } else L.mvxT = 0;
       const T = targets(L, t);
+      L.noteG = T.noteG || 1;   // 笔记模式整组缩放系数：水母标签同步缩放（文本框不缩会挤压且线条起点错位）
+      if (T.fan) L.fanMeta = {panMax: T.fan.panMax || 0, n: L.items.length};
       const intro = L.stage === 'hub' && !L.reduced;
       // 光球
       const orbS = intro && since < .15 ? T.orb.s * .35 : T.orb.s;
@@ -692,15 +730,15 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         if (inner) inner.style.transform = `rotate(${rot}deg) scaleX(${MOD_STYLE[m.id].flip}) scaleY(${(L.stage === 'hub' ? 1 : .92) * (1 + .045 * breathe)})`;
         j.breathe = breathe;
         if (lab) {
-          const lw = lab.offsetWidth, lh = lab.offsetHeight;
-          // 标签统一放水母正下方（hub 同款）：环布局下所有水母常驻，标签全部可见；
-          // 旧 noteG 整组缩放已随列布局退役（给详情页让位改由相机取景承担）
+          const lw = lab.offsetWidth, lh = lab.offsetHeight, ng = L.noteG || 1;
+          const hub = L.stage === 'hub', narrow = L.size.w < 760;
+          // 标签统一放水母正下方（hub 同款）：不占右侧连线路径，触须直接从伞体右缘出发
           const lx = x - lw / 2;
           const ly = y + s * .36;
           lab.style.transformOrigin = 'left center';
-          lab.style.transform = `translate3d(${lx}px,${ly}px,0)`;
-          lab.style.opacity = clamp(lo, 0, 1);
-          j.label = {x: lx, y: ly, w: lw, h: lh};   // w/h 记视觉宽（触须源头用）
+          lab.style.transform = `translate3d(${lx}px,${ly}px,0) scale(${ng})`;
+          lab.style.opacity = clamp(narrow && !hub && m.id !== L.mod ? 0 : lo, 0, 1);
+          j.label = {x: lx, y: ly, w: lw * ng, h: lh * ng};   // w/h 记缩放后的视觉宽
         }
         // —— 光标引力可见化：位移吸引在 targets 里已算好，这里按弹簧后的真实位置重算拉力强度，
         // 驱动三层特效——水母伞缘水波纹（拉得越强纹越密）、吸入光丝（光点漂向光标）、光标吸积环 ——
@@ -753,9 +791,9 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
             const e = ph * ph * (3 - 2 * ph);   // smoothstep：先缓后急，被"吸进去"
             const rim = s * .4, sa = c._a || 0;
             const sx0 = x + Math.cos(sa) * rim, sy0 = y + Math.sin(sa) * rim;
-            const cx0 = (sx0 + L.smx) / 2 + Math.sin(sa + 1.7) * 24, cy0 = (sy0 + L.smy) / 2 + Math.cos(sa + 1.2) * 24;
-            c.setAttribute('cx', bez(sx0, cx0, cx0, L.smx, e));
-            c.setAttribute('cy', bez(sy0, cy0, cy0, L.smy, e));
+            const cx0 = (sx0 + L.mx) / 2 + Math.sin(sa + 1.7) * 24, cy0 = (sy0 + L.my) / 2 + Math.cos(sa + 1.2) * 24;
+            c.setAttribute('cx', bez(sx0, cx0, cx0, L.mx, e));
+            c.setAttribute('cy', bez(sy0, cy0, cy0, L.my, e));
             c.style.opacity = pu > .04 ? Math.sin(Math.min(1, ph) * Math.PI) * .8 : 0;
           });
         }
@@ -801,116 +839,87 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
         if (target > 0 || cur > .004) {
           gv._op = Math.max(target, cur - dt * 1.4);   // 淡入直接跟、淡出走平滑
           gv.style.opacity = gv._op.toFixed(3);
-          if (L.smx != null) gv.style.transform = `translate3d(${L.smx}px,${L.smy}px,0)`;   // 零延迟直跟鼠标（世界坐标，svg 在世界层内）；断流保持原位淡出
+          if (L.mx != null) gv.style.transform = `translate3d(${L.mx}px,${L.my}px,0)`;   // 零延迟直跟鼠标；断流保持原位淡出
           const r1 = gv.children[0], r2 = gv.children[1];
           if (r1) r1.style.strokeDashoffset = -((t * 26) % 43);
           if (r2) r2.style.strokeDashoffset = (t * 17) % 27;
         }
       }
-      // 层级递进环（M2 同心展开）：卡片弹簧状态按节点 id 全局缓存（Map）——钻深/回退时同一张卡在
-      // "当前环 ↔ 祖先环"之间换角色而位置连续（旧环原地淡出、回退时原地复明，不重生长不闪跳）。
-      // 每环的触须都从上一环"钻入卡"外缘径向长出（首环由选中水母喂养）——"水母→下一层"同一模式逐级复用
+      // 层级递进列（kb 钻取）：卡片弹簧状态按节点 id 全局缓存（Map）——钻深/回退时同一张卡在
+      // "当前列 ↔ 祖先列"之间换角色而位置连续（旧列原地等比缩小、回退时原地放大，不重生长不闪跳）。
+      // 每列的触须都从上一列"钻入卡"右缘扇形展开（首列由水母标签喂养）——"水母→下一层"同一模式逐级复用
       const sj = L.mod && S.jelly[L.mod];
       const vis = L.vis || (L.vis = new Map());
-      const touched = new Set();   // 本帧渲染到的卡片（祖先环/当前环），没触到的置 off——重进当前环时从源头重生
+      const touched = new Set();   // 本帧渲染到的卡片（祖先列/当前列），没触到的置 off——重进当前列时从源头重生
       const cardState = (id, sx, sy, ss) => {
         let st = vis.get(id);
         if (!st) { st = {x: sp(sx), y: sp(sy), s: sp(ss), o: sp(0), seen: false}; vis.set(id, st); }
         return st;
       };
-      let feed = null;   // 当前环的喂养源：最深祖先环选中卡外缘（无祖先时=选中水母伞体外缘，fan 段接棒）
-      const prevFeed = [];   // prevFeed[k][i]：第 k 环各卡的外缘喂养点（只有钻入卡记录，供下一环触须接力）
+      let feed = sj?.cur ? {x: sj.cur.x + sj.cur.s * .5 + 6, y: sj.cur.y, o: 1} : null;   // 当前列的喂养源=伞体右缘：一路接棒到最深祖先列的选中卡
       (T.acols || []).forEach((col, k) => {
         const cards = ancLevels[k];
-        if (!col || !cards) return;
+        if (!cards) return;
+        const src = feed;   // 本列触须源头=上一列选中卡（首列=水母标签），本列选中卡稍后接棒
         col.forEach((tp, i) => {
           if (!tp) return;
           const n = cards[i];
-          const st = cardState(n.id, tp.x, tp.y, tp.s);
+          const st = cardState(n.id, src ? src.x : tp.x, src ? src.y : tp.y, tp.s);
           st.role = 'anc'; touched.add(n.id);
-          // M3 视口裁剪：屏外卡隐藏并跳过弹簧（回到视野时从目标位原地重生，不横穿世界）
-          const off = !inView(tp.x, tp.y);
-          if (off !== !!st.culled) {
-            st.culled = off;
-            const el0 = aItemRefs.current[k]?.[i];
-            if (el0) el0.style.visibility = off ? 'hidden' : '';
-            if (!off) { st.x.x = tp.x; st.x.v = 0; st.y.x = tp.y; st.y.v = 0; st.o.x = 0; st.seen = false; }
-          }
-          if (st.culled) { const p0 = aThreadRefs.current[k]?.[i]; if (p0) p0.style.opacity = 0; return; }
           const ready = L.reduced || now - L.chainStart > 60 + (k * 6 + i) * Math.min(50, 900 / Math.max(cards.length, 1));
           if (clamp(st.o.x, 0, 1) > .6) st.seen = true;
           const x = spring(st.x, tp.x, dt, 62), y = spring(st.y, tp.y + (L.reduced ? 0 : Math.sin(t * .6 + i * .8 + k * 1.3) * 3), dt, 62);
           const s = spring(st.s, tp.s, dt, 62), o = spring(st.o, st.seen || ready ? (tp.dim ? .62 : 1) : 0, dt, 40);
           const el = aItemRefs.current[k]?.[i];
           const sc = clamp(s, .2, 1);
-          if (el) { el.style.transformOrigin = 'top left'; el.style.transform = `translate3d(${x}px,${y}px,0) scale(${sc})`; el.style.opacity = clamp(o, 0, 1) * fogOf(k + 2); el.style.pointerEvents = clamp(o, 0, 1) > .6 ? '' : 'none'; }
+          if (el) { el.style.transformOrigin = 'top left'; el.style.transform = `translate3d(${x}px,${y}px,0) scale(${sc})`; el.style.opacity = clamp(o, 0, 1); el.style.pointerEvents = clamp(o, 0, 1) > .6 ? '' : 'none'; }
           if (tp.path && el) {
-            // 喂养点=钻入卡径向外缘（下一环在更外侧，线从卡的外侧边出发不穿自家兄弟卡）
-            const dl = Math.hypot(tp.x || .001, tp.y - oy) || 1;
-            feed = {x: x + (tp.x / dl) * (el.offsetWidth * sc + 8), y: y + ((tp.y - oy) / dl) * 16 * sc, o: clamp(o, 0, 1)};
+            feed = {x: x + el.offsetWidth * sc + 6, y: y + 15 * sc, o: clamp(o, 0, 1)};   // 文件触须源头=最深祖先列选中卡右缘（整组缩放后文件列仍在右侧，右缘出线不穿自家兄弟卡）
           }
           const p = aThreadRefs.current[k]?.[i];
-          if (p) {
-            const src = k === 0 ? (sj?.cur ? {x: sj.cur.x + sj.cur.s * .5 + 6, y: sj.cur.y, o: 1} : null) : prevFeed[k - 1];
-            if (src) {
-              const ey = y + 15 * sc, mx = (src.x + x) / 2;
-              const csw = L.reduced ? 0 : Math.sin(t * .7 + i * .9 + k * 1.3) * 5;   // 链线同款慢漂浮（端点钉死、只摆中段）
-              p.setAttribute('d', `M${src.x},${src.y} C${mx},${src.y + csw} ${mx},${ey - csw} ${x + 2},${ey}`);   // 终点插入卡内 2px，接住卡首圆点
-              p.style.opacity = clamp(Math.min(o, src.o), 0, 1) * (tp.path ? .55 : .3) * fogOf(k + 2);   // R73 链线调淡 + M3 环雾化
-              // 链线上的流动脉冲（与扇形触须同款）：水母→分类→内容 逐级接力，链路"活"起来
-              const pc = aThreadPulseRefs.current[k]?.[i];
-              if (pc) {
-                const u = (t * .22 + i * .37 + k * .5) % 1;
-                pc.setAttribute('cx', bez(src.x, mx, mx, x - 4, u));
-                pc.setAttribute('cy', bez(src.y, src.y + csw, ey - csw, ey, u));
-                pc.style.opacity = L.reduced || L.paused ? 0 : clamp(Math.min(o, src.o), 0, 1) * Math.sin(u * Math.PI) * (tp.path ? .9 : .35);
-              }
-            } else p.style.opacity = 0;
-          }
-          (prevFeed[k] ||= [])[i] = tp.path && feed ? {...feed} : null;
+          if (p && src) {
+            const ey = y + 15 * sc, mx = (src.x + x) / 2;
+            const csw = L.reduced ? 0 : Math.sin(t * .7 + i * .9 + k * 1.3) * 5;   // 链线同款慢漂浮（端点钉死、只摆中段）
+            p.setAttribute('d', `M${src.x},${src.y} C${mx},${src.y + csw} ${mx},${ey - csw} ${x + 2},${ey}`);   // 终点插入卡内 2px，接住卡首圆点
+            p.style.opacity = clamp(Math.min(o, src.o), 0, 1) * (tp.path ? .55 : .3);   // R73 链线 .85/.4→.55/.3（线条整体调淡）
+            // 链线上的流动脉冲（与扇形触须同款）：水母→分类→内容 逐级接力，链路"活"起来
+            const pc = aThreadPulseRefs.current[k]?.[i];
+            if (pc) {
+              const u = (t * .22 + i * .37 + k * .5) % 1;
+              pc.setAttribute('cx', bez(src.x, mx, mx, x - 4, u));
+              pc.setAttribute('cy', bez(src.y, src.y + csw, ey - csw, ey, u));
+              pc.style.opacity = L.reduced || L.paused ? 0 : clamp(Math.min(o, src.o), 0, 1) * Math.sin(u * Math.PI) * (tp.path ? .9 : .35);
+            }
+          } else if (p) p.style.opacity = 0;
         });
       });
-      // 选中模块 → 内容环（M2 径向扇形展开）；祖先链存在时触须从最深祖先环"钻入卡"外缘长出，
-      // 否则从选中水母伞体外缘长出（径向朝外，环环相扣）
-      if (T.fan && sj?.cur) {
-        let ox2, oy2;
-        if (T.acols && feed && feed.o > .5) { ox2 = feed.x; oy2 = feed.y; }
-        else {
-          const dl = Math.hypot(sj.cur.x || .001, sj.cur.y - oy) || 1;
-          ox2 = sj.cur.x + (sj.cur.x / dl) * (sj.cur.s * .5 + 10); oy2 = sj.cur.y + ((sj.cur.y - oy) / dl) * (sj.cur.s * .5 + 10);
-        }
+      // 选中模块 → 多篇笔记（触须式扇形展开）；kb 钻取时触须从最深祖先列的"钻入卡"右缘长出
+      if (T.fan && sj?.label) {
+        const narrow = L.size.w < 760;
+        let ox2 = narrow ? sj.label.x + sj.label.w / 2 : sj.cur.x + sj.cur.s * .5 + 6, oy2 = narrow ? sj.label.y + sj.label.h + 4 : sj.cur.y;
+        if (T.acols && feed && feed.o > .5) { ox2 = feed.x; oy2 = feed.y; }   // 钻取时触须从最深祖先列选中卡右缘长出（线条连接对应的文本框）
         items.forEach((n, i) => {
-          const tp = T.fan.items[i];
-          if (!tp) return;
           const st = cardState(n.id, ox2, oy2, T.fan.scale || 1);
-          // 触须一根一根依次长出（20 条约 1.8 秒），形成伞状开花的节奏。
-          // 卡片重进当前环（ESC 回退/重访）时弹簧重置到源头重生——不是从旧位置平移拉过去，始终是"生出下一层"
+          // 触须一根一根依次长出（20 条约 1.8 秒），形成伞状开花的节奏；panY=滚轮平移量（长清单画布）。
+          // 卡片重进当前列（ESC 回退/重访）时弹簧重置到源头重生——不是从旧位置平移拉过去，始终是"生出下一层"
           if (st.role !== 'cur') { st.x = sp(ox2); st.y = sp(oy2); st.s = sp(T.fan.scale || 1); st.o = sp(0); st.seen = false; }
           st.role = 'cur'; touched.add(n.id);
-          // M3 视口裁剪：屏外卡隐藏并跳过弹簧（283 张卡全铺开时的性能闸）
-          const off = !inView(tp.x, tp.y);
-          if (off !== !!st.culled) {
-            st.culled = off;
-            const el0 = itemRefs.current[i];
-            if (el0) el0.style.visibility = off ? 'hidden' : '';
-            if (!off) { st.x.x = ox2; st.y.x = oy2; st.o.x = 0; st.seen = false; }
-          }
-          if (st.culled) { const p0 = fanRefs.current[i]; if (p0) p0.style.opacity = 0; return; }
           const ready = L.reduced || now - L.fanStart > 160 + i * Math.min(90, 1800 / Math.max(items.length, 1));
           if (clamp(st.o.x, 0, 1) > .6) st.seen = true;
           const grow = st.seen || ready;
-          const tx = tp.x, ty = tp.y + (L.reduced ? 0 : Math.sin(t * .8 + i * .9) * 2);
+          const pan = L.panY || 0;
+          const tx = T.fan.x, ty = T.fan.y0 + i * T.fan.gap - pan + (L.reduced ? 0 : Math.sin(t * .8 + i * .9) * 2);
           const x = spring(st.x, grow ? tx : ox2, dt, 70), y = spring(st.y, grow ? ty : oy2, dt, 70), o = spring(st.o, grow ? 1 : 0, dt, 50);
-          const sc = clamp(spring(st.s, T.fan.scale || 1, dt, 62), .3, 1);
+          const sc = clamp(spring(st.s, T.fan.scale || 1, dt, 62), .3, 1);   // 笔记模式整组缩放时文件卡同步缩
           const el = itemRefs.current[i];
-          if (el) { el.style.transformOrigin = 'top left'; el.style.transform = `translate3d(${x}px,${y - 15}px,0) scale(${sc})`; el.style.opacity = clamp(o, 0, 1) * fogOf(T.fan.ring + 2); }
+          if (el) { el.style.transformOrigin = 'top left'; el.style.transform = `translate3d(${x}px,${y - 15}px,0) scale(${sc})`; el.style.opacity = clamp(o, 0, 1); }
           const p = fanRefs.current[i];
           if (p) {
             const dx = x - ox2, sway = L.reduced ? 0 : Math.sin(t * .9 + i * .7) * 9 + Math.sin(t * .47 + i * 1.9) * 4;   // 双频纵摆=活物感
             const c1x = ox2 + dx * .5 + (L.reduced ? 0 : Math.sin(t * .6 + i) * 6), c1y = oy2 + sway, c2x = x - dx * .45, c2y = y - sway * .5;
             p.setAttribute('d', `M${ox2},${oy2} C${c1x},${c1y} ${c2x},${c2y} ${x + 2},${y}`);   // 终点插入卡内，接住卡首圆点
             const on = sel === n.id;
-            p.style.opacity = clamp(o, 0, 1) * fogOf(T.fan.ring + 2) * (sel ? (on ? 1 : .35) : .55);   // R73 调淡 + M3 环雾化
+            p.style.opacity = clamp(o, 0, 1) * (sel ? (on ? 1 : .35) : .55);   // R73 未选中触须 .8→.55（线条整体调淡）
             p.style.strokeWidth = on ? 1.8 : 1;
             (fanPulseRefs.current[i] || []).forEach((c, k) => {
               if (!c) return;
@@ -930,17 +939,13 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       // 且恢复事件不可靠——动画循环里 4s 巡检一次，非主动暂停就拉起
       if (t - (L.vidChk || 0) > 4) {
         L.vidChk = t;
-        if (!L.paused && !L.reduced) Object.values(vids.current).forEach(p => { if (p.video && p.video.paused && !p.culled) p.video.play().catch(() => {}); });
+        if (!L.paused && !L.reduced) Object.values(vids.current).forEach(p => { if (p.video && p.video.paused) p.video.play().catch(() => {}); });
       }
       for (const [vid, pair] of Object.entries(vids.current)) {
         // 生动感（10-18 二轮）：播放速度随呼吸相位 0.78~1.22 明显律动（原 0.87~1.13 太含蓄看不出），
         // 伞体收缩半程慢、舒张半程快=真实的脉冲推进节奏；第二形态仍半速安静
-        // M3 视口裁剪：世界位置在屏外的视频暂停+停绘（壁纸 WebView2 的视频解码是真实开销，拉远看全景时不白烧）
-        const pos = vid === 'orb' ? {x: ox, y: oy} : S.jelly[vid]?.cur;
-        pair.culled = pos ? !inView(pos.x, pos.y, 160) : false;
         if (pair.video) pair.video.playbackRate = vid === 'orb' ? 1
           : (L.stage === 'hub' ? 1 + .22 * (S.jelly[vid]?.breathe || 0) : .5);
-        if (pair.culled) { if (pair.video && !pair.video.paused && !L.paused) pair.video.pause(); continue; }
         paintVideo(pair, vid === 'orb' ? null : {t, seed: vid.charCodeAt(0) % 7 + vid.length * 2.7, reduced: L.reduced});
       }
     };
@@ -955,11 +960,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
   // R73（用户令"动画要一直流畅"）：撤掉 document.hidden 暂停条件——壁纸 WebView2 常年处于
   // 后台/隐藏态，这条规则在壁纸场景=视频开局即冻且恢复不可靠；意外暂停由动画循环 4s 自愈兜底
   useEffect(() => {
-    const sync = () => Object.values(vids.current).forEach(p => {
-      if (!p.video) return;
-      if (live.current.paused || live.current.reduced || p.culled) p.video.pause();
-      else p.video.play().catch(() => {});
-    });
+    const sync = () => document.querySelectorAll('.scene video').forEach(v => { if (live.current.paused || live.current.reduced) v.pause(); else v.play().catch(() => {}); });
     live.current.syncVideo = sync; sync();
     document.addEventListener('visibilitychange', sync);
     return () => document.removeEventListener('visibilitychange', sync);
@@ -994,7 +995,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       </button>;
     }))}
     {items.map((n, i) => {
-      const meta = itemMeta(n), fp = t0.fan?.items?.[i] || {x: 240, y: 200}, bd = nodeBadge(n);
+      const meta = itemMeta(n), fp = t0.fan, bd = nodeBadge(n);
       // folder 性质的卡（分区/分类/子目录/时间窗）当前列也定宽 160——与祖先列同宽：
       // 卡宽跨层恒定（钻取前后不跳变），列距 240=160 卡+80 线的节奏对所有模块成立
       // （自适应宽时任务流卡仅 ~100px、服务舱 ~209px，线后空隙 40~140px 忽长忽短）。
@@ -1002,7 +1003,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
       // 单击先触发不撤销，双击再叠加全文，两种深度都不损失且单击零延迟。
       return <button key={n.id} className={`fan-item ${n.kind === 'folder' ? 'mini ' : ''}${sel === n.id ? 'active' : ''} kind-${n.kind}`} ref={el => { itemRefs.current[i] = el; }} onClick={() => onItem(n)}
         onDoubleClick={() => { if (READABLE_KINDS.has(n.kind)) onAction({type: 'read', id: n.id}); }}
-        style={{'--kc': KINDS[n.kind].color, transform: `translate3d(${fp.x}px,${fp.y - 15}px,0) scale(${t0.fan?.scale || 1})`, transformOrigin: 'top left'}} aria-label={`打开 ${n.title} 的分析，双击直接阅读全文`}>
+        style={{'--kc': KINDS[n.kind].color, transform: `translate3d(${fp.x}px,${fp.y0 + i * fp.gap - 15}px,0) scale(${fp.scale || 1})`, transformOrigin: 'top left'}} aria-label={`打开 ${n.title} 的分析，双击直接阅读全文`}>
         <span className="fi-dot"/>
         <span className="fi-body">
           <span className="fi-title">{n.short || n.title}</span>
@@ -1018,7 +1019,7 @@ function Scene({graph, items, onModule, onItem, onAction, onHome, live, sel, zon
     {/* 水母独立顶层（用户令 10-15 三轮）：.scene 是 z-index:2 的层叠上下文，水母困在里面永远被
         z=8 的面板压住——移出 scene 放进 jelly-layer(z=20)，真正压过搜索框/图例/详情栏等一切内容。
         坐标系同 scene（absolute inset 0），rAF 写 transform 的逻辑不变；含静态兜底位（rAF 冻结保底可见） */}
-    <div className="jelly-layer" ref={jellyLayerRef}>
+    <div className="jelly-layer">
       {/* 线条随水母同层置顶（用户令 10-15 四轮）：神经丝/脉冲/波纹/触须不再被面板压住 */}
       <svg className="threads" aria-hidden="true">
         <defs>
@@ -1080,6 +1081,17 @@ function Dock({graph, onGo, onAction}) {
   const s = useMemo(() => stats(graph), [graph]);
   const [q, setQ] = useState('');
   const [cards, setCards] = useState(null);
+  // 搜索会话（用户令 10-23）：点击搜索框即开会话，结果面板没关（✕/Esc）之前水母和线条
+  // 恒在搜索框之下——此前 .dock:focus-within 一旦失焦（点结果卡/点画布）z 掉回 8，水母层 z=20 又盖上来。
+  // blur 时若结果面板还开着，会话保持；没开过结果则直接结束会话。
+  const [session, setSession] = useState(false);
+  const endSession = () => { setCards(null); setSession(false); };
+  useEffect(() => {
+    if (!session) return;
+    const onKey = e => { if (e.key === 'Escape') endSession(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [session]);
   const typing = useRef(null);
   const kbCtl = useRef(null);   // 8342 检索串行化：新查询掐掉上一发（kbserve 并发排队会互相污染时序）
   // 混合查询（10-16 升级三路）：①本地图谱规则卡 ②工作站全域命中卡（任务/拍板/指令/记忆/服务关键词）
@@ -1134,9 +1146,9 @@ function Dock({graph, onGo, onAction}) {
   // 壁纸原生输入回填已上移到 data/live.js 通用通道（星图 10-18 二轮）：所有输入框共用，
   // 本框带 data-wv-submit="form"，LivelyMod 回车提交后自动触发检索
   const kpis = [['内容节点', 'Notes', s.content], ['连接', 'Links', s.links], ['双向共振', 'Mutual', s.mutual], ['未创建', 'Unresolved', s.ghosts]];
-  return <div className="dock">
+  return <div className={`dock${session ? ' ask-open' : ''}`}>
     {cards && <section className="ask-results glass" aria-live="polite">
-      <header><span><Icon name="spark" size={14}/>图谱分析 <em>Graph analysis</em></span><small>图谱规则 + KB 混合检索 · Graph + KB search</small><button className="icon-btn" aria-label="关闭分析" onClick={() => setCards(null)}><Icon name="close" size={14}/></button></header>
+      <header><span><Icon name="spark" size={14}/>图谱分析 <em>Graph analysis</em></span><small>图谱规则 + KB 混合检索 · Graph + KB search</small><button className="icon-btn" aria-label="关闭分析" onClick={endSession}><Icon name="close" size={14}/></button></header>
       <div className="ask-cards">{cards.list.map((c, i) => <article key={i} className={`ask-card tone-${c.tone}`} style={{animationDelay: i * 90 + 'ms'}}>
         <h4>{c.title} <em>{c.en}</em></h4>
         <p style={c.wrap ? {whiteSpace: 'pre-wrap', lineHeight: 1.6} : undefined}>{c.text}</p>
@@ -1148,7 +1160,7 @@ function Dock({graph, onGo, onAction}) {
     <div className="dock-panel glass">
       <div className="dock-kpis">{kpis.map(([k, en, v]) => <div key={k}><span>{k} <em>{en}</em></span><strong>{v}</strong></div>)}</div>
       <form className="ask" onSubmit={e => { e.preventDefault(); ask(q); }}>
-        <input value={q} onChange={e => setQ(e.target.value)} onFocus={e => wvFocus(e.target)} onBlur={() => wvBlur()} data-wv-submit="form" placeholder="问问你的生态图谱… Ask your graph" aria-label="向图谱提问"/>
+        <input value={q} onChange={e => setQ(e.target.value)} onFocus={e => { setSession(true); wvFocus(e.target); }} onBlur={() => { if (!cards) setSession(false); wvBlur(); }} data-wv-submit="form" placeholder="问问你的生态图谱… Ask your graph" aria-label="向图谱提问"/>
         <button className="send" aria-label="提交问题"><Icon name="send" size={16}/></button>
       </form>
       <div className="dock-chips">
@@ -1159,73 +1171,6 @@ function Dock({graph, onGo, onAction}) {
   </div>;
 }
 
-// 小地图（M3 景深三件套）：右下角世界缩略图——光球/五水母（模块色）/内容环点阵 + 当前视野框；
-// 点击/按住拖动把相机中心移过去。位置来自 targets 纯函数重算（不碰 DOM 弹簧），10fps 足够
-function MiniMap({live}) {
-  const boxRef = useRef(null), cvsRef = useRef(null);
-  const scaleOf = T => {   // 世界范围→小地图比例（绘制与点击跳转共用同一份换算）
-    let ext = 980;   // 基准=第一环+光球；内容环点阵超出时按最远点扩
-    (T.fan?.items || []).forEach(p => { ext = Math.max(ext, Math.hypot(p.x, (p.y - (T.orb?.y || 0)) / .8) + 180); });
-    const sc = Math.min((178 - 14) / 2, (118 - 10) / 2) / ext;
-    return {sc, cx: 178 / 2, cy: 118 / 2 - (T.orb?.y || 0) * sc};
-  };
-  useEffect(() => {
-    let raf, last = 0;
-    const draw = now => {
-      raf = requestAnimationFrame(draw);
-      if (now - last < 100) return;
-      last = now;
-      const cvs = cvsRef.current, L = live.current;
-      if (!cvs || !L?.size?.w) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      if (cvs.width !== 178 * dpr) { cvs.width = 178 * dpr; cvs.height = 118 * dpr; }
-      const ctx = cvs.getContext('2d');
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, 178, 118);
-      const T = targets(L, L.time || 0);
-      const {sc, cx, cy} = scaleOf(T);
-      // 内容环卡点（祖先环淡、当前清单亮）
-      ctx.fillStyle = 'rgba(190,196,190,.35)';
-      (T.acols || []).forEach(col => col?.forEach(p => { ctx.beginPath(); ctx.arc(cx + p.x * sc, cy + p.y * sc, 1.1, 0, 7); ctx.fill(); }));
-      ctx.fillStyle = 'rgba(230,235,230,.6)';
-      (T.fan?.items || []).forEach(p => { ctx.beginPath(); ctx.arc(cx + p.x * sc, cy + p.y * sc, 1.2, 0, 7); ctx.fill(); });
-      // 五水母（模块色）与光球
-      for (const m of MODULES) {
-        const j = T.jelly[m.id];
-        if (!j) continue;
-        ctx.fillStyle = MOD_STYLE[m.id].color;
-        ctx.beginPath(); ctx.arc(cx + j.x * sc, cy + j.y * sc, 2, 0, 7); ctx.fill();
-      }
-      ctx.fillStyle = '#e6cf98';
-      ctx.beginPath(); ctx.arc(cx + (T.orb?.x || 0) * sc, cy + (T.orb?.y || 0) * sc, 2.6, 0, 7); ctx.fill();
-      // 视野框（当前相机缩放对应的可视区）
-      const cv = L.camView || {x: 0, y: 0, z: 1};
-      const vw = L.size.w / cv.z * sc, vh = L.size.h / cv.z * sc;
-      ctx.strokeStyle = 'rgba(230,207,152,.8)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(cx + cv.x * sc - vw / 2, cy + cv.y * sc - vh / 2, vw, vh);
-      // hub 且相机基本在家时半隐（不打扰主画面），拉远/平移开后全亮
-      const home = Math.abs(cv.x) < 60 && Math.abs(cv.y) < 60 && Math.abs(cv.z - 1) < .06;
-      if (boxRef.current) boxRef.current.style.opacity = (L.stage === 'hub' && home) ? '.22' : '1';
-    };
-    raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
-  }, [live]);
-  const jump = e => {
-    const cvs = cvsRef.current, L = live.current;
-    if (!cvs) return;
-    const r = cvs.getBoundingClientRect();
-    const {sc, cx, cy} = scaleOf(targets(L, L.time || 0));
-    const CT = L.camTgt || (L.camTgt = {x: 0, y: 0, z: 1});
-    CT.x = (e.clientX - r.left - cx) / sc; CT.y = (e.clientY - r.top - cy) / sc;
-    L.camManual = true;
-  };
-  return <div className="minimap glass" ref={boxRef} aria-label="小地图：点击移动视野">
-    <canvas ref={cvsRef} onPointerDown={jump} onPointerMove={e => { if (e.buttons) jump(e); }}/>
-    <span className="mm-tip">世界小地图 · 点击跳视野 <em>Minimap</em></span>
-  </div>;
-}
-
 export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced, ecoEvents = [], docBack = null, onDocBack = null}) {
   const stageRef = useRef(null);
   // 吸附态水母点击接管用的进模块回调（事件 effect 依赖 []，经 ref 拿最新 mod/stage；语义同 Scene 的 onModule）
@@ -1233,6 +1178,7 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   moduleJump.current = id => setFocus({mod: id === mod && stage !== 'hub' ? mod : id, zone: null, sel: null});
   const [size, setSize] = useState({w: 1280, h: 760});
   const [paused, setPaused] = useState(false);
+  const [panned, setPanned] = useState(false);   // 用户滚过一次后隐藏平移提示（提示用完即走）
   const {mod, zone, sel} = focus;
   const stage = sel ? 'note' : mod ? 'module' : 'hub';
   const items = useMemo(() => moduleItems(graph, mod, mod === 'kb' || mod === 'services' || mod === 'tasks' ? (zone || '') : undefined), [graph, mod, zone]);
@@ -1298,8 +1244,8 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   if (!live.current) {
     const now = performance.now();
     live.current = {t0: now, time: 0, stage, mod, items, size, reduced, paused: false, hover: null, fanStart: now,
-      chainStart: 0, zonePath: null, vis: new Map(), orb: {x: 0, y: 0, s: 400}, camTgt: {x: 0, y: 0, z: 1}, camManual: false,
-      springs: {dust: sp(.3), orb: {x: sp(0), y: sp(0), s: sp(120), o: sp(0)}, jelly: Object.fromEntries(MODULES.map(m => [m.id, {x: sp(0), y: sp(0), s: sp(20), o: sp(0), lo: sp(0)}]))}};
+      chainStart: 0, zonePath: null, vis: new Map(), orb: {x: 640, y: 380, s: 400},
+      springs: {dust: sp(.3), orb: {x: sp(size.w / 2), y: sp(size.h / 2), s: sp(120), o: sp(0)}, jelly: Object.fromEntries(MODULES.map(m => [m.id, {x: sp(size.w / 2), y: sp(size.h / 2), s: sp(20), o: sp(0), lo: sp(0)}]))}};
     let seen = false;
     try { seen = !!sessionStorage.getItem('neural-intro-seen'); } catch {}
     live.current.introSeen = reduced || seen;
@@ -1325,60 +1271,38 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   }, []);
   useEffect(() => { try { sessionStorage.setItem('neural-intro-seen', '1'); } catch {} }, []);
   useEffect(() => { live.current.syncVideo?.(); }, [paused]);
-  // 换层时递进环的入场节奏重新计时（卡片弹簧状态按 id 存在 vis Map 里不重置——钻深/回退位置连续）+
-  // 相机自动取景（M1/M2）：导航变化把对应环系捧到眼前（取景点/缩放由 targets 的 ringInfo 给出，与环布局同源）；
-  // 打开内容（note）时凑近选中卡、取景点左移避让右侧分析面板。用户一旦手动滚轮/拖拽（camManual）即让位，
-  // 双击空白/光球回家再交还
-  useEffect(() => {
-    const L = live.current;
-    L.chainStart = performance.now();
-    L.camManual = false;
-    const T0 = targets(L, 0);
-    let tgt = {x: 0, y: T0.orb.y || 0, z: 1};
-    const ri = T0.ringInfo;
-    if (L.stage !== 'hub' && ri) tgt = {x: Math.cos(ri.a0) * ri.fx, y: (T0.orb.y || 0) + Math.sin(ri.a0) * ri.fy, z: ri.z};
-    if (L.stage === 'note') {
-      const idx = L.items.findIndex(n => n.id === sel);
-      const tp = idx >= 0 && T0.fan?.items?.[idx];
-      if (tp) tgt = {x: tp.x - L.size.w * .14, y: tp.y, z: Math.max(.85, tgt.z)};
-    }
-    L.camTgt = tgt;
-  }, [mod, zone, sel]);
-  // 滚轮 = 相机缩放（M1 世界化：原"滚轮平移长清单"由无限画布相机接管，指针下世界点保持不动）。
+  // 换层时清单平移归零（重新从顶部看起），平移提示也复位；递进列的入场节奏重新计时
+  // （卡片弹簧状态按 id 存在 vis Map 里不重置——钻深/回退时旧列原地缩小/放大，位置连续）
+  useEffect(() => { live.current.panY = 0; setPanned(false); live.current.chainStart = performance.now(); }, [mod, zone, live]);
+  // 滚轮 = 平移长清单画布（module/note 视图且内容超出视口时）。
   // 页面失焦/后台时渲染管线冻结（rAF、ResizeObserver 回调都不送达），挂载瞬间的陈旧尺寸会一直留着；
-  // 所以这里同步补测 clientWidth/Height，滚轮路径不依赖渲染帧。
+  // 所以这里同步补测 clientWidth/Height 并按需重算 panMax（targets 是纯函数），滚轮路径不依赖渲染帧。
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
     const onWheel = e => {
       const L = live.current;
-      // 信息栏（最右详情块）/弹窗/搜索结果/生态流水/小地图内部是原生滚动区：事件落在里面就放行，不劫持成缩放
-      if (e.target?.closest?.('.analysis-wrap, .veil, .ask-results, .ecostream, .minimap')) return;
+      // 信息栏（最右详情块）/弹窗/搜索结果/生态流水内部是原生滚动区：事件落在里面就放行，不劫持成平移
+      if (e.target?.closest?.('.analysis-wrap, .veil, .ask-results, .ecostream')) return;
       const w = el.clientWidth, h = el.clientHeight;
       if (w && (L.size.w !== w || L.size.h !== h)) { L.size = {w, h}; setSize({w, h}); }
+      if (L.stage === 'hub') return;   // module 和 note（笔记开着）都允许滚轮平移清单——否则点开一篇后长清单被锁死没法选其他篇
+      const panMax = targets(L, 0).fan?.panMax || 0;
+      if (!panMax) return;
       e.preventDefault();
-      const CT = L.camTgt || (L.camTgt = {x: 0, y: 0, z: 1});
-      const CV = L.camView || CT;
-      const rect = el.getBoundingClientRect();
-      const sx = e.clientX - rect.left - w / 2, sy = e.clientY - rect.top - h / 2;
-      const z1 = clamp(CT.z * Math.exp(-e.deltaY * (e.ctrlKey ? .008 : .0016)), .2, 2.6);   // ctrl+滚轮=触控板捏合，步进放大
-      // 指针下的世界点缩放前后保持不动（以当前显示值为基准投影，连续滚动不漂移）
-      CT.x = CV.x + sx / CV.z - sx / z1; CT.y = CV.y + sy / CV.z - sy / z1; CT.z = z1;
-      L.camManual = true;
+      L.panY = clamp((L.panY || 0) + e.deltaY, 0, panMax);
+      if (e.deltaY > 0) setPanned(true);
     };
     el.addEventListener('wheel', onWheel, {passive: false});
-    // 触屏单指拖动 = 平移相机（触控板双指=滚轮缩放走上面；信息栏内同样放行原生滚动）
+    // 触屏单指拖动 = 平移长清单（触控板双指=滚轮走上面；信息栏内同样放行原生滚动）
     let touchPt = null;
     const onTouchMove = e => {
       const L = live.current;
-      if (e.touches.length !== 1 || e.target?.closest?.('.analysis-wrap, .veil, .ask-results, .ecostream, .minimap')) { touchPt = null; return; }
+      if (e.touches.length !== 1 || e.target?.closest?.('.analysis-wrap, .veil, .ask-results, .ecostream')) { touchPt = null; return; }
       const t = e.touches[0];
-      if (touchPt) {
-        e.preventDefault();
-        const CT = L.camTgt || (L.camTgt = {x: 0, y: 0, z: 1});
-        const CV = L.camView || CT;
-        CT.x += (touchPt.x - t.clientX) / CV.z; CT.y += (touchPt.y - t.clientY) / CV.z;
-        L.camManual = true;
+      if (touchPt && L.stage !== 'hub') {
+        const panMax = targets(L, 0).fan?.panMax || 0;
+        if (panMax) { e.preventDefault(); L.panY = clamp((L.panY || 0) + (touchPt.y - t.clientY), 0, panMax); setPanned(true); }
       }
       touchPt = {x: t.clientX, y: t.clientY};
     };
@@ -1422,47 +1346,11 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
       pressPt = null;
       moduleJump.current(a.id);
     };
-    // 空白拖拽平移（M1）：只在空白处起手（交互元素/正被吸附的水母除外），位移超 5px 才算拖；
-    // 松手后的 click 落在起手时的空白元素上，不会误触卡片/水母（手势优先级：水母拖拽 > 卡片交互 > 画布平移）
-    let panPt = null;
-    const onPanDown = e => {
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
-      if (live.current.attJelly) return;   // 正握着吸附水母=拖动优先
-      if (e.target?.closest?.('button, input, textarea, select, a, .analysis-wrap, .veil, .ask-results, .stage-tools, .crumbs, .zone-trail, .minimap, .ecostream, .legend, .dock, .jelly, .jelly-label')) return;
-      panPt = {x: e.clientX, y: e.clientY};
-    };
-    const onPanMove = e => {
-      if (!panPt) return;
-      const dx = e.clientX - panPt.x, dy = e.clientY - panPt.y;
-      if (Math.hypot(dx, dy) < 5) return;
-      const L = live.current;
-      el.classList.add('panning');
-      const CT = L.camTgt || (L.camTgt = {x: 0, y: 0, z: 1});
-      const CV = L.camView || CT;
-      CT.x -= dx / CV.z; CT.y -= dy / CV.z;
-      const CS = L.camS;   // 弹簧当前值一并平移：1:1 跟手无弹簧滞后
-      if (CS) { CS.x.x -= dx / CV.z; CS.x.v = 0; CS.y.x -= dy / CV.z; CS.y.v = 0; }
-      L.camManual = true;
-      panPt = {x: e.clientX, y: e.clientY};
-    };
-    const onPanUp = () => { if (panPt) { panPt = null; el.classList.remove('panning'); } };
-    // 双击空白 = 回家（相机回光球原点、缩放复位）
-    const onDbl = e => {
-      if (e.target?.closest?.('button, input, textarea, select, a, .fan-item, .jelly, .jelly-label, .analysis-wrap, .veil, .ask-results, .stage-tools, .crumbs, .zone-trail, .minimap, .ecostream, .legend, .dock, .orb')) return;
-      const L = live.current;
-      L.camManual = false;
-      L.camTgt = {x: 0, y: targets(L, 0).orb?.y || 0, z: 1};
-    };
-    el.addEventListener('pointerdown', onPanDown);
-    window.addEventListener('pointermove', onPanMove);
-    window.addEventListener('pointerup', onPanUp);
-    el.addEventListener('dblclick', onDbl);
     window.addEventListener('mousemove', onMouseMove);
     el.addEventListener('pointerdown', onStagePd, true);
     el.addEventListener('click', onStageClk, true);
     el.addEventListener('pointerleave', onSceneLeave);
     return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('touchmove', onTouchMove); el.removeEventListener('touchend', onTouchEnd);
-      el.removeEventListener('pointerdown', onPanDown); window.removeEventListener('pointermove', onPanMove); window.removeEventListener('pointerup', onPanUp); el.removeEventListener('dblclick', onDbl);
       window.removeEventListener('mousemove', onMouseMove); el.removeEventListener('pointerdown', onStagePd, true); el.removeEventListener('click', onStageClk, true); el.removeEventListener('pointerleave', onSceneLeave); };
   }, []);
   useEffect(() => {
@@ -1474,7 +1362,7 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
         const tag = e.target?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable) return;
         if (document.activeElement?.tagName === 'BUTTON' && (e.key === ' ' || e.key.startsWith('Arrow'))) return;   // 焦点在卡上时方向键留给无障碍导航
-        // 光标悬在信息栏上时，上下键滚面板本身（与滚轮同款路由），否则平移相机
+        // 光标悬在信息栏上时，上下键滚面板本身（与滚轮/拖拽同款路由），否则平移清单
         const cur = L.cursor;
         const panelEl = cur && document.elementFromPoint(cur.x, cur.y)?.closest?.('.analysis-wrap');
         if (panelEl) {
@@ -1482,11 +1370,13 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
           const pstep = {ArrowDown: 120, PageDown: 400, ArrowUp: -120, PageUp: -400}[e.key] || 0;
           if (sc && pstep) { e.preventDefault(); sc.scrollTop += pstep; return; }
         }
-        // 相机平移（M1）：方向键/翻页键移动视野（步长随缩放折算世界距离），Home=回家（原清单平移已由相机取代）
-        const CT = L.camTgt || (L.camTgt = {x: 0, y: 0, z: 1});
-        const kstep = {ArrowDown: [0, 240], PageDown: [0, 640], ArrowUp: [0, -240], PageUp: [0, -640], ArrowLeft: [-240, 0], ArrowRight: [240, 0]}[e.key];
-        if (kstep) { e.preventDefault(); CT.x += kstep[0] / CT.z; CT.y += kstep[1] / CT.z; L.camManual = true; return; }
-        if (e.key === 'Home') { e.preventDefault(); L.camManual = false; L.camTgt = {x: 0, y: 0, z: 1}; }
+        if (L.stage === 'hub') return;
+        const panMax = targets(L, 0).fan?.panMax || 0;
+        if (!panMax) return;
+        const step = {ArrowDown: 120, PageDown: 400, ArrowUp: -120, PageUp: -400}[e.key] || 0;
+        if (step) { e.preventDefault(); L.panY = clamp((L.panY || 0) + step, 0, panMax); setPanned(true); return; }
+        if (e.key === 'Home') { e.preventDefault(); L.panY = 0; return; }
+        if (e.key === 'End') { e.preventDefault(); L.panY = panMax; setPanned(true); }
         return;
       }
       if (sel) setFocus({mod, zone, sel: null});
@@ -1518,10 +1408,9 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
   const replay = () => {
     const L = live.current, now = performance.now();
     L.t0 = now; L.time = 0;
-    L.camManual = false; L.camTgt = {x: 0, y: 0, z: 1};   // 相机一起回光球原点（重播开场=回家）
     const S = L.springs;
     S.orb.s.x = 120; S.orb.o.x = 0;
-    for (const m of MODULES) Object.assign(S.jelly[m.id], {x: sp(0), y: sp(0), s: sp(20), o: sp(0), lo: sp(0)});
+    for (const m of MODULES) Object.assign(S.jelly[m.id], {x: sp(L.orb.x), y: sp(L.orb.y), s: sp(20), o: sp(0), lo: sp(0)});
     setFocus({mod: null, sel: null});
   };
   const node = sel ? graph.index.get(sel) : null;
@@ -1559,7 +1448,7 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
       <h1>人间有味是清欢。</h1>
       <p className="hub-en">The truest flavor of life is its quiet joys.</p>
       <p className="hub-meta">{MODULES.length} 个模块 <em>modules</em> · {s.content} 条内容 <em>notes</em> · {s.links} 条连接 <em>links</em></p>
-      <p className="hub-hint">点击水母，展开模块 · 滚轮缩放 · 空白拖拽平移 · 双击空白回家 <em>Wheel to zoom · drag to pan · double-click home</em></p>
+      <p className="hub-hint">点击水母，展开模块 · <em>Tap a jellyfish to expand</em></p>
     </div>
 
     {stage !== 'hub' && <nav className="crumbs" aria-label="图谱路径">
@@ -1608,10 +1497,9 @@ export function Home({graph, layout, focus, setFocus, onAction, onAbout, reduced
         </React.Fragment>
       ))}
     </div>}
-    {stage === 'module' && <p className="module-hint">{mod === 'kb' && !zone ? '选择一个分区进入' : mod === 'services' && !zone ? '选择一个分类进入服务舱' : mod === 'tasks' && !zone ? '选择一个分类进入任务流' : mod === 'kb' ? '点目录进入下一层 · 点笔记查看全部分析' : '选择一篇笔记查看全部分析'} · 滚轮缩放看全环 · <em>Select to explore</em></p>}
+    {stage === 'module' && !panned && (targets(live.current, 0).fan?.panMax || 0) > 0 && <div className="pan-hint" aria-hidden="true">▼ 滚轮往下平移清单 <em>{items.length} 条</em></div>}
 
-    {/* 小地图（M3）：世界缩略图+视野框，点击/拖动跳转视野；相机在家且 hub 时半隐让位主画面 */}
-    <MiniMap live={live}/>
+    {stage === 'module' && <p className="module-hint">{mod === 'kb' && !zone ? '选择一个分区进入' : mod === 'services' && !zone ? '选择一个分类进入服务舱' : mod === 'tasks' && !zone ? '选择一个分类进入任务流' : mod === 'kb' ? '点目录进入下一层 · 点笔记查看全部分析' : '选择一篇笔记查看全部分析'} · <em>Select to explore</em></p>}
 
     {node && <aside className="analysis-wrap" key={sel}>
       <Analysis graph={graph} node={node} module={m} onGo={go} onAction={onAction} onClose={() => setFocus({mod, zone, sel: null})}/>

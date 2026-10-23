@@ -394,14 +394,14 @@ export function taskOrigin(t, full) {
     }
     if (ref) out.push(`来源行：${ref.replace(/^src\d+:/, '')}`);
   } else if (src === 'wechat' && ref) {
-    // 微信@我：拆出 群/发言人 与 @我的原文
+    // 微信@我：拆出 群/发言人 与 @我的原文（10-23 用户令「原文要完整」——去掉 120 字截断，DB 里存多长显多长）
     const seg = ref.split('\n');
     const head = (seg[0] || '').replace(/wxid\S+/g, '').replace(/:+\s*$/g, '').trim();
     const rest = seg.slice(1).map(s => s.trim()).filter(Boolean).join(' ');
     if (head) out.push(`群/发言人：${head}`);
-    if (rest) out.push(`原文：${rest.length > 120 ? rest.slice(0, 120) + '…' : rest}`);
+    if (rest) out.push(`原文：${rest}`);
   } else if (ref) {
-    out.push(`关联：${ref.length > 100 ? ref.slice(0, 100) + '…' : ref}`);
+    out.push(`关联：${ref}`);
   }
   out.push(`创建 ${t?.created_at || full?.created_at || '—'} · 更新 ${t?.updated_at || full?.updated_at || '—'}`);
   return out.join('\n');
@@ -433,7 +433,12 @@ function analyze(graph, node, detail) {
     const T = graph.nodes.filter(n => n.kind === 'task');
     const t = node.task || {};
     const full = detail?.task || {};                       // 8331 详情接口的任务全行（notes/confidence/attachments 等长文本都在）
-    const notes = String(full.notes || '');
+    // 10-23 用户令「任务拉取要完整信息」：notes 为空的微信任务，任务内容区回退显示微信原文全文（不再空白）
+    const rawNotes = String(full.notes || t.notes || '');
+    const wxText = String(t.source) === 'wechat'
+      ? String(full.source_ref || t.source_ref || '').split('\n').slice(1).map(s => s.trim()).filter(Boolean).join('\n')
+      : '';
+    const notes = rawNotes || (wxText ? `（无备注——以下为微信原文）\n${wxText}` : '');
     const st = STATUS_ZH[t.status] || t.status || '—';
     const same = T.filter(x => x.task?.status === t.status).length;
     // review=AI 申报专属态：人工通道只给 接受/打回（打回必填原因，走 hub.review 闸门），不给五态扇形

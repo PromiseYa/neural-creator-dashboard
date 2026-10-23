@@ -93,8 +93,11 @@ export function buildGraph({tasks = [], decisions = [], memories = [], services 
   // 任务流：工作站实体投影（实时，只读）
   for (const t of tasks) {
     const id = 'task:' + t.id;
+    // 10-23 搜索能命中任务内容：text 纳入 notes 与来源原文（微信 source_ref 尾段），各截 200 字防索引膨胀
     add({id, kind: 'task', title: `${t.id} ${t.title}`, short: t.title.length > 22 ? t.title.slice(0, 22) + '…' : t.title,
-      path: `任务流/${t.id}`, folder: 'f:tasks', text: `${t.id} ${t.title} ${STATUS_ZH[t.status] || t.status || ''} ${t.priority || ''}`, task: t, date: t.updated_at});
+      path: `任务流/${t.id}`, folder: 'f:tasks',
+      text: `${t.id} ${t.title} ${STATUS_ZH[t.status] || t.status || ''} ${t.priority || ''} ${String(t.notes || '').slice(0, 200)} ${String(t.source_ref || '').slice(0, 200)}`,
+      task: t, date: t.updated_at});
     link('f:tasks', id, 'contain');
   }
 

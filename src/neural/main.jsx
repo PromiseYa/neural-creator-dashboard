@@ -7,7 +7,8 @@ import {CONFIG, asset} from '../config';
 import {buildGraph, forceLayout, stats, KINDS, STATUS_ZH, PRIO_ZH} from './graph';
 import {renderMarkdown, stripFrontmatter} from './markdown';
 import {Home} from './Home';
-import {Lightbox, TaskContent, TaskExtra, SRC_ZH, DuePick} from './Analysis';
+import {Lightbox, TaskContent, TaskExtra, SRC_ZH, DuePick, taskOrigin} from './Analysis';
+import EcoMapBody from './EcoMap';
 import {Icon} from './icons';
 import './neural.css';
 
@@ -105,14 +106,15 @@ function Reader({node, graph, onJump, onBack, canBack, onTaskOp, onClose}) {
   const rendered = useMemo(() => (node.kind === 'note' || node.kind === 'memory') && data && !isTxt
     ? renderMarkdown(body, data.dir) : null, [data, body, node.kind, isTxt]);
   const tags = useMemo(() => String(meta.tags || '').replace(/^\[|\]$/g, '').split(/[,，]/).map(s => s.trim()).filter(Boolean), [meta]);
-  const task = isTask ? (data?.task || node.task || {}) : {};
+  // 任务行合并：8331 详情全行 + 图谱节点自带的 src_name/src_sheet/src_path（attachSrcInfo 只在 vite 投影侧附）
+  const task = isTask ? {...(node.task || {}), ...(data?.task || {})} : {};
   const dec = isDecision ? (data?.row || {}) : {};
   const cm = isCommand ? (node.command || {}) : {};
 
   // 复制全文的原文：笔记/记忆=markdown 正文；任务=notes 全文；拍板/指令=结构化拼接
   const fullText = useMemo(() => {
     if (node.kind === 'note' || node.kind === 'memory') return body;
-    if (isTask) return String(task.notes || '');
+    if (isTask) return String(task.notes || '') || taskOrigin(task);   // 无备注的任务：复制全文退回来源原文
     if (isDecision) return [dec.title && `【拍板事项】${dec.title}`, dec.proposal && `【方案】${dec.proposal}`,
       dec.why && `【理由】${dec.why}`, dec.impact && `【影响】${dec.impact}`].filter(Boolean).join('\n\n');
     if (isCommand) return [cm.prompt && `【指令】${cm.prompt}`, cm.result && `【结果】${cm.result}`].filter(Boolean).join('\n\n');
@@ -235,12 +237,22 @@ function Reader({node, graph, onJump, onBack, canBack, onTaskOp, onClose}) {
         {String(cm.result || '').trim() && <><h3>执行结果 <em>Result</em></h3><p>{cm.result}</p></>}
       </article>}
 
-      {/* 任务：正文（内嵌图片解析）+ 就地编辑 + 执行现场（附件/时间线） */}
+      {/* 任务：正文（内嵌图片解析）+ 来源原文（10-23 用户令「阅读原文要完整」：微信原文/Excel 来源行全文，
+          此前微信任务只显示空备注"标题即全部"，原文藏在 source_ref 里没展示）+ 就地编辑 + 执行现场 */}
       {isTask && data && <>
         <article className="reader-md">
           <h3>任务内容 <em>Content</em></h3>
           <TaskContent tid={task.id} text={task.notes} onZoom={setZoom}/>
         </article>
+        {task.source_ref && <article className="reader-md">
+          <h3>来源原文 <em>Source</em></h3>
+          {task.source === 'plan' && (task.src_name || task.src_sheet || task.src_path) && <p className="md-meta">
+            {task.src_name && <span className="chip static mini">Excel {task.src_name}</span>}
+            {task.src_sheet && <span className="chip static mini">页签 {task.src_sheet}</span>}
+            {task.src_path && <span className="quiet">{String(task.src_path).split(/[\\/]/).pop()}</span>}
+          </p>}
+          <p className="rd-src-text">{taskOrigin(task)}</p>
+        </article>}
         <section className="rd-edit">
           <h3>编辑 <em>Edit</em></h3>
           {editing?.note !== undefined ? <>
@@ -423,10 +435,15 @@ function EcoCheckModal({onClose, eco}) {
     Promise.all([
       fetch('/api/schedule').then(r => r.json()).catch(() => null),
       fetch('/api/now-md').then(r => r.json()).catch(() => null),
-      fetch('/api/eco-baseline').then(r => r.json()).catch(() => null)
-    ]).then(([sch, now, base]) => {
+      fetch('/api/eco-baseline').then(r => r.json()).catch(() => null),
+      // 引擎核心（10-21 用户令「结合全局引擎补充内容」）：8331 实时队列/完成/告警 + 工作者近 7/30 天产出
+      fetch('/api/platform/engine-overview').then(r => r.json()).catch(() => null),
+      fetch('/api/platform/engine-workers').then(r => r.json()).catch(() => null),
+      // 生态实况（10-23 用户令「体检按实际情况更新」）：端口探测 + dispatcher 剧本 + 代谢节律 + 备份新鲜度
+      fetch('/api/eco-live').then(r => r.json()).catch(() => null)
+    ]).then(([sch, now, base, eng, wkr, live]) => {
       if (stop) return;
-      setD({sch, now}); setPrev(base?.prev || null);
+      setD({sch, now, eng, wkr, live}); setPrev(base?.prev || null);
       // 基线内容 = 定时任务名集合 + 在办条数 + 常驻工作者在线数（group=worker 投影口径，防对比口径漂移）
       const rsOk = (eco?.services || []).filter(s => s.group === 'worker' && s.state === 'ok').length;
       snapRef.current = {
@@ -445,28 +462,41 @@ function EcoCheckModal({onClose, eco}) {
   }, []);
   const v = eco?.vitals;
   const svcs = eco?.services || [];
-  const links = [
-    {name: '微信推送链路', key: 'wecompush', desc: 'done/拍板/告警即时推'},
-    {name: '飞书指令桥', key: 'feishu', desc: 'feishu-bridge 常驻工作者'},
-    {name: 'ZCode 派发执行', key: 'zrunner', desc: '领单执行 AI 定时'},
-    {name: '微信哨兵', key: 'wxwatch', desc: '群消息三分拣'}
+  const live = d?.live;
+  // 通道现状（10-23 按 10-20 脱钩后的实际重排）：微信推送/飞书桥/ZCode 派发已停用是"正常态"不再当断链报；
+  // 在跑的通道=微信哨兵（消息进任务）+ 四个在线服务端口。停用项灰显标注，不进红黄判定。
+  const chan = [
+    {name: '微信哨兵 wxwatch', desc: '群消息三分拣进任务池', ok: live?.wxwatch_heart ? true : null, hint: live?.wxwatch_heart ? `心跳 ${live.wxwatch_heart}` : '心跳文件不可达'},
+    {name: '微信推送 wecompush', desc: 'done/拍板/告警即时推', off: true, hint: '已停用（10-20 脱钩，恢复须用户明示）'},
+    {name: '飞书指令桥 feishu-bridge', desc: '飞书群指令进拍板', off: true, hint: '已停用（10-20 脱钩）'},
+    {name: 'ZCode 派发 zrunner', desc: '领单执行 AI 定时', off: true, hint: '已停用（recurring 全 disabled，纯本地代谢替代）'}
   ];
-  for (const l of links) {
-    const w = svcs.find(s => String(s.id || '').startsWith(l.key) || String(s.desc || '').includes(l.key));
-    // 链路口径：down=真断（红）；noreport=没接心跳上报（灰，不算断——wecompush 等 lib 型查不到即 na）
-    l.ok = w ? (w.state === 'ok' ? true : w.state === 'down' ? false : null) : null;
-  }
-  // 体检结论（红黄绿 + 一句话）：待拍板/链路断=黄，常驻工作者真超时过半=红，其余=绿。
-  // 口径：services 投影里 group=worker 的即常驻工作者；noreport（没接心跳上报）≠掉线，不参与判红。
-  const down = links.filter(l => l.ok === false).length;
+  // 体检结论（红黄绿 + 一句话）：引擎宿主/检索等关键端口断=黄，待拍板=黄，
+  // 常驻工作者真超时过半=红，其余=绿。noreport（没接心跳上报）≠掉线，不参与判红。
+  const portsDown = (live?.ports || []).filter(p => p.ok === false);
+  const down = portsDown.length;
   const residents = svcs.filter(s => s.group === 'worker');
   const resOk = residents.filter(s => s.state === 'ok').length;
   const resHard = residents.filter(s => s.state === 'down').length;
   const verdict = (residents.length >= 2 && resHard >= Math.ceil(residents.length / 2))
     ? {cls: 'red', text: `常驻工作者掉线过半（${resHard}/${residents.length}），先看服务舱`}
     : (v?.pending_decisions > 0 || down > 0)
-      ? {cls: 'amber', text: [v?.pending_decisions > 0 ? `${v.pending_decisions} 件待拍板` : '', down > 0 ? `${down} 条链路断` : ''].filter(Boolean).join('，') + '——需要你出手'}
-      : {cls: 'green', text: '生态健康：链路通、无积压，不用管'};
+      ? {cls: 'amber', text: [v?.pending_decisions > 0 ? `${v.pending_decisions} 件待拍板` : '', down > 0 ? `在线服务断 ${down} 个（${portsDown.map(p => p.name).join('、')}）` : ''].filter(Boolean).join('，') + '——需要你出手'}
+      : {cls: 'green', text: '生态健康：端口通、无积压，不用管'};
+  // 备份新鲜度判定：时间戳距今 N 小时内=绿
+  const fresh = (ts, hours) => { if (!ts) return false; const t = new Date(String(ts).replace(' ', 'T')); return Number.isFinite(+t) && Date.now() - t < hours * 3600000; };
+  // 代谢节律剧本的人话名（数据源 /api/eco-live，live 解析 dispatcher.py PLAYBOOKS）
+  const METAB = [
+    ['memorycore_distill', '记忆蒸馏', '每晚 21~23 点窗，会话记忆→KB 收件箱'],
+    ['memorycore_weeklysync', '记忆周同步', '每周六，池状态对账'],
+    ['kb_git_push', 'KB 云端推送', 'GitHub 私有库，有新提交才推'],
+    ['zcode_mem_backup', '记忆体系备份', 'memories/experience/AGENTS.md'],
+    ['kb_backup_check', 'KB 备份新鲜度', '每日快照是否按时落地'],
+    ['smoke_test', '中枢冒烟自检', '每周日，临时库隔离跑全流程'],
+    ['syscheck_gate', '体检门控', '12/20 点快检，全绿免 AI'],
+    ['tfssync', 'TFS 取新', '任务来源 Excel 保鲜（15 分钟）'],
+    ['health_probe', '工作者健康探测', '心跳巡检+哨兵自愈']
+  ];
   // 变化对比：与上次体检的基线比
   const cur = snapRef.current;
   let delta = null;
@@ -515,13 +545,64 @@ function EcoCheckModal({onClose, eco}) {
           <div><b>{resOk}/{residents.length}</b><span>常驻工作者在线</span></div>
         </div>
       </section>
-      <section><h3>推送 / 派发链路 <em>Channels</em></h3>
-        <ul className="eco-list">{links.map(l => <li key={l.name}><i className={l.ok ? 'on' : l.ok === false ? 'off' : 'na'}/>{l.name}<small>{l.desc}</small></li>)}</ul>
+      <section><h3>引擎核心 <em>Engine core</em></h3>
+        {/* 全局引擎实时面（10-21）：引擎执行队列的切片口径（谁在跑/攒了多少）+ 产出节奏 + 工作者活跃，
+            与上面 Vitals（未结/待拍板）互补——一屏看清整个生态的发动机在干什么 */}
+        {!d && <p className="quiet">读取中…</p>}
+        {d && !d.eng && <p className="quiet">引擎宿主（8331）不可达——队列与工者活跃暂缺</p>}
+        {d?.eng && <>
+          <div className="eco-kpis">
+            <div><b>{d.eng.tasks?.pending?.length ?? 0}</b><span>待派</span></div>
+            <div><b>{(d.eng.tasks?.doing?.length || 0) + (d.eng.tasks?.dispatched?.length || 0)}</b><span>执行中</span></div>
+            <div><b>{d.eng.tasks?.waiting_confirm?.length ?? 0}</b><span>待确认</span></div>
+            <div><b>{(d.eng.tasks_done_today || []).length}</b><span>今日完成</span></div>
+            <div><b>{d.eng.tasks_done_count_30d ?? '—'}</b><span>30 天完成</span></div>
+            <div><b>{(d.eng.alarms || []).filter(a => a.status === 'active').length}</b><span>在岗闹钟</span></div>
+          </div>
+          <p className="eco-src">数据源：引擎宿主 /api/overview（hub.db 实时投影）· 快照 {String(d.eng.updated || '').slice(5, 16) || '—'}</p>
+        </>}
+        {d?.wkr?.workers?.length > 0 && <>
+          <p className="eco-sub">工作者近况（ev=events 台账计数 · 零台账≠沉睡，库/常驻型各走心跳渠道）</p>
+          <ul className="eco-list compact">
+            {d.wkr.workers.filter(w => !w.retired).slice(0, 8).map(w => <li key={w.id}>
+              <i className={w.act_level === 'active' ? 'on' : 'na'}/>{w.emoji ? w.emoji + ' ' : ''}{w.name || w.id}
+              <small>{w.type_label || w.type || ''} · 7 天 {w.ev7 || 0} / 30 天 {w.ev30 || 0}{w.last_ev ? ` · 最近 ${String(w.last_ev).slice(5, 16)}` : ''}</small>
+            </li>)}
+          </ul>
+        </>}
+      </section>
+      <section><h3>在线服务与通道 <em>Services &amp; channels</em></h3>
+        {/* 10-23 重排：四端口实测探测（TCP）+ 在跑通道 + 停用通道灰显——替代 10-20 前的"推送四卡"口径 */}
+        <ul className="eco-list">
+          {(live?.ports || []).map(p => <li key={p.name}>
+            <i className={p.self || p.ok ? 'on' : 'off'}/>{p.name} <small>:{p.port} · {p.desc}{p.self ? ' · 本面板，恒在线' : p.ok === false ? ' · 端口不通' : ''}</small>
+          </li>)}
+          {!live && <li><i className="na"/>端口探测读取中…</li>}
+          {chan.map(c => <li key={c.name}>
+            <i className={c.off ? 'na' : (c.ok ? 'on' : 'off')}/>{c.name}<small>{c.off ? c.hint : c.hint}</small>
+          </li>)}
+        </ul>
+      </section>
+      <section><h3>代谢节律 <em>Metabolism · dispatcher</em></h3>
+        <p className="eco-sub">dispatcher 每 15 分钟一轮纯本地扫描（零 AI 会话零推送，10-23 恢复）· 上轮心跳 {live?.dispatcher?.last_beat || '—'} · routine 剧本 {(live?.playbooks || []).filter(p => p.routine).length}/{(live?.playbooks || []).length} 在册</p>
+        <ul className="eco-list compact">
+          {METAB.map(([key, zh, desc]) => { const m = live?.metabolism?.[key];
+            return <li key={key}><i className={m ? 'on' : 'na'}/>{zh}
+              <small>{m ? `${m.ts} · ${m.msg.slice(0, 52)}` : `${desc} · 近期无记录`}</small></li>; })}
+        </ul>
+      </section>
+      <section><h3>备份与保鲜 <em>Backups &amp; freshness</em></h3>
+        <ul className="eco-list compact">
+          <li><i className={fresh(live?.backup?.kbbak, 48) ? 'on' : 'off'}/>kbbak 本地快照<small>{live?.backup?.kbbak || '—'} · 每日凌晨 · 超 48h 未更新算黄</small></li>
+          <li><i className={fresh(live?.backup?.kbbak_onedrive, 48) ? 'on' : 'off'}/>OneDrive 离机副本<small>{live?.backup?.kbbak_onedrive || '—'}</small></li>
+          <li><i className={live?.metabolism?.kb_git_push ? 'on' : 'na'}/>KB 云端（GitHub 私有库）<small>{live?.metabolism?.kb_git_push ? live.metabolism.kb_git_push.ts + ' · ' + live.metabolism.kb_git_push.msg.slice(0, 40) : '—'}</small></li>
+          {(live?.sources || []).map(s => <li key={s.id}><i className={s.enabled ? 'on' : 'off'}/>来源「{s.name}」<small>{s.enabled ? `页签 ${s.sheet || '首表'} · 上次扫描 ${String(s.last_scan_at || '—').slice(5, 16)} · ${s.last_count ?? 0} 行` : '已停用'}</small></li>)}
+        </ul>
       </section>
       <section><h3>我的定时资产 <em>My schedule</em></h3>
         {!d && <p className="quiet">读取中（schtasks 枚举约 2~5 秒）…</p>}
         {d?.sch?.ok === false && <p className="quiet">计划任务枚举失败：{d.sch.err}</p>}
-        {d?.sch?.recurring?.length > 0 && <p className="eco-sub">AI 定时（dispatcher · recurring.json · {d.sch.recurring.filter(r => r.enabled).length} 启用/{d.sch.recurring.length} 总）</p>}
+        {d?.sch?.recurring?.length > 0 && <p className="eco-sub">AI 定时（dispatcher · recurring.json · {d.sch.recurring.filter(r => r.enabled).length} 启用/{d.sch.recurring.length} 总）{d.sch.recurring.every(r => !r.enabled) ? ' · 全停用=正常（10-20 脱钩，纯本地代谢替代）' : ''}</p>}
         {d?.sch?.recurring?.map(r => <div key={r.key} className="eco-row"><i className={r.enabled ? 'on' : 'off'}/>{r.key}<small>{r.prompt}</small></div>)}
         {d?.sch?.tasks && <>
           <p className="eco-sub">Windows 计划任务 {d.sch.tasks.length} 个（我手动创建 · 未禁用）</p>
@@ -1128,7 +1209,8 @@ function App() {
         <span className="brand-text">{CONFIG.brand.name} <b>/ {CONFIG.brand.sub}</b><small>{CONFIG.brand.tagline} · {CONFIG.brand.taglineEn}</small></span>
       </a>
       <div className="top-actions">
-        <button className="avatar eco-avatar" onClick={() => setModal('eco')} aria-label="生态体检：定时任务/推送链路/AI 定时/当前在办，一屏看全健康面" title="生态体检：定时任务 / 推送链路 / AI 定时 / 当前在办，一屏看全健康面（代替晨检日报）">🩺</button>
+        <button className="avatar eco-avatar" onClick={() => setModal('eco')} aria-label="生态体检：引擎队列/工者活跃/定时任务/推送链路/当前在办，一屏看全健康面" title="生态体检：引擎核心（队列·产出·工者活跃）/ 定时任务 / 推送链路 / 当前在办，一屏看全健康面（代替晨检日报）">🩺</button>
+        <button className="avatar" onClick={() => setModal('ecomap')} aria-label="生态全景图：五层结构与全流程细节" title="生态全景图：常驻卡/检索/任务/增长/备份五层全流程 · 记忆与知识库怎么运作 · 在线服务与运行节律（全部实物路径与端口）">🗺️</button>
         <button className="avatar" onClick={() => setModal('about')} aria-label="关于本图与数据来源"><img src={asset(CONFIG.avatar)} alt=""/></button>
       </div>
     </header>
@@ -1189,6 +1271,7 @@ function App() {
       pullRef.current?.();
     }}/>}
     {modal === 'eco' && <EcoCheckModal onClose={close} eco={eco}/>}
+    {modal === 'ecomap' && <Modal title="生态全景图" en="Ecosystem map" onClose={close} wide><EcoMapBody/></Modal>}
     {rejecting && <ReviewRejectModal id={rejecting} onClose={() => setRejecting(null)} onDone={msg => {
       setRejecting(null);
       setToast(msg);

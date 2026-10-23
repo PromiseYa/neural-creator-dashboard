@@ -1,6 +1,8 @@
 import {defineConfig} from 'vite';
 import fs from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
+import net from 'node:net';
 import {spawn, execFile} from 'node:child_process';
 
 // KB 现场扫描：页面每次请求 /api/kb-graph 时实时读知识库 markdown（正本零写入），
@@ -310,7 +312,8 @@ function entitiesPlugin() {
           try {
             // source_ref（星图 10-20 五轮）：带上任务来源行键，图谱任务节点 → 档案页可按 src{id} 追溯到具体来源文件
             // 10-21：attachSrcInfo 再附 src_name/src_sheet/src_path——任务卡/详情直接显示「哪个 Excel 哪个页签」
-            const open = db.prepare(`SELECT id,title,status,priority,due,source,source_ref,attachments,created_at,updated_at FROM tasks
+            // 10-23：补 notes——任务内容随轮询直出（用户令「拉取完整任务信息」，不再只看到完成度和日期）
+            const open = db.prepare(`SELECT id,title,status,priority,due,source,source_ref,notes,attachments,created_at,updated_at FROM tasks
                                      WHERE status IN (?,?,?,?,?) ORDER BY updated_at DESC`).all(...TASK_OPEN);
             attachSrcInfo(db, open);
             const doneToday = db.prepare(`SELECT id,title,done_at FROM tasks WHERE status='done'
@@ -392,7 +395,8 @@ function platformApiPlugin() {
         withDb(res, db => {
           // source_ref（星图 10-20 五轮）：带上任务来源行键，档案页「实际数据」可按 src{id} 追溯到具体来源文件
           // 10-21：attachSrcInfo 附 src_name/src_sheet/src_path——任务卡/详情显示「哪个 Excel 哪个页签」
-          const open = db.prepare(`SELECT id,title,status,priority,due,source,source_ref,attachments,created_at,updated_at FROM tasks
+          // 10-23：补 notes（与 /api/entities 同步，任务内容进轮询）
+          const open = db.prepare(`SELECT id,title,status,priority,due,source,source_ref,notes,attachments,created_at,updated_at FROM tasks
                                    WHERE status IN (?,?,?,?,?) ORDER BY updated_at DESC`).all(...TASK_OPEN);
           attachSrcInfo(db, open);
           const doneToday = db.prepare(`SELECT id,title,done_at FROM tasks WHERE status='done'
@@ -482,6 +486,45 @@ function platformApiPlugin() {
 // /api/schedule = Windows 计划任务清单（PowerShell UTF-8 输出，5 分钟缓存）+ LoopDeck recurring.json AI 定时。
 const NOW_MD = 'D:/Portable/KnowledgeBase/brain/NOW.md';
 const RECURRING = 'D:/Portable/Documents/工作管理/LoopDeck/tasks/recurring.json';
+const DISPATCHER_PY = 'D:/Portable/Documents/工作管理/LoopDeck/hub/dispatcher.py';
+const KBBAK_LATEST = 'D:/Portable/Documents/工作管理/LoopDeck/workers/kbbak/latest';
+const KBBAK_ONEDRIVE = 'D:/DeltaBox/OneDrive - Delta Electronics, Inc/KBBackup/latest';
+const WXWATCH_HEART = 'D:/Portable/Documents/工作管理/LoopDeck/workers/wxwatch/heart.log';
+// 生态在线服务全景（与生态运行手册地址簿同源；星图自身直接标在线）
+const ECO_PORTS = [
+  {name: '星图', port: 5173, self: true, desc: 'vite dev + 7 只读中间件 + 引擎看护'},
+  {name: '引擎宿主', port: 8331, desc: 'LoopDeck server.py --engines（写操作唯一入口+dispatcher）'},
+  {name: 'kbserve 检索', port: 8342, desc: '知识库 RAG 检索（语义+关键词混合）'},
+  {name: 'VPN路由', port: 8321, desc: 'VpnRouter（内网通道）'}
+];
+const tcpOk = (port, timeout = 800) => new Promise(res => {
+  const s = net.connect({port, host: '127.0.0.1'});
+  const done = ok => { s.destroy(); res(ok); };
+  s.setTimeout(timeout, () => done(false));
+  s.on('connect', () => done(true));
+  s.on('error', () => done(false));
+});
+const fmtTs = v => {
+  const n = Number(v);
+  if (Number.isFinite(n) && n > 0) {
+    const d = new Date(n > 1e11 ? n : n * 1000);
+    const p = x => String(x).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  return String(v || '').slice(0, 16);
+};
+const dirNewest = p => {
+  try {
+    let m = 0;
+    // 含目录：kbbak 用 robocopy 保留源文件时间戳，文件 mtime=内容时间；目录 mtime=备份动作时间，
+    // 取二者最大才是"备份多久没跑"的正确口径（10-23 实证：文件最新 10-11、目录 10-22 21:00）
+    for (const f of fs.readdirSync(p)) {
+      const st = fs.statSync(path.join(p, f));
+      if (st.mtimeMs > m) m = st.mtimeMs;
+    }
+    return m ? fmtTs(m / 1000) : null;
+  } catch { return null; }
+};
 function ecosystemPlugin() {
   return {
     name: 'eco-check',
@@ -532,6 +575,51 @@ function ecosystemPlugin() {
         cache = await loadSchedule(); cacheAt = Date.now();
         json(res, 200, cache);
       });
+      // /api/eco-live（10-23 生态体检实况，纯本地零 AI）：端口探测 + dispatcher 剧本实况（live 解析
+      // dispatcher.py PLAYBOOKS 注册表，不用静态副本防漂移）+ 代谢节律最近结果 + 备份双份新鲜度 + 微信哨兵心跳。
+      let liveCache = null, liveAt = 0;
+      server.middlewares.use('/api/eco-live', async (req, res) => {
+        if (liveCache && Date.now() - liveAt < 30000) return json(res, 200, liveCache);
+        const playbooks = [];
+        try {
+          const src = fs.readFileSync(DISPATCHER_PY, 'utf8');
+          // dispatcher.py 是 Python：布尔值 True/False 大写开头
+          const re = /"([\w_]+)":\s*\{"name":\s*"([^"]+)",\s*"risk":\s*"(\w+)",\s*"routine":\s*(True|False)/g;
+          for (const m of src.matchAll(re)) playbooks.push({id: m[1], name: m[2], risk: m[3], routine: m[4] === 'True'});
+        } catch {}
+        const out = {
+          ports: ECO_PORTS.map(p => ({...p})),
+          dispatcher: {interval_min: 15, last_beat: null, last_runs: []},
+          playbooks,
+          metabolism: {},
+          backup: {kbbak: dirNewest(KBBAK_LATEST), kbbak_onedrive: dirNewest(KBBAK_ONEDRIVE)},
+          wxwatch_heart: null,
+          sources: []
+        };
+        await Promise.all(out.ports.map(async p => { if (!p.self) p.ok = await tcpOk(p.port); }));
+        try {
+          const {DatabaseSync} = await import('node:sqlite');
+          const db = new DatabaseSync(HUB_DB, {readOnly: true});
+          try {
+            const hb = db.prepare(`SELECT ts FROM heartbeats WHERE name='dispatcher' ORDER BY ts DESC LIMIT 1`).get();
+            out.dispatcher.last_beat = hb ? fmtTs(hb.ts) : null;
+            out.dispatcher.last_runs = db.prepare(`SELECT ts, detail FROM events WHERE kind='dispatch' AND action='run'
+                                                    ORDER BY ts DESC LIMIT 14`).all()
+              .map(r => ({ts: fmtTs(r.ts), text: String(r.detail || '')}));
+            // 代谢节律：每个关键剧本取最近一次结果（蒸馏/周同步/KB推送/记忆备份/备份新鲜度/中枢冒烟/体检门控/TFS取新）
+            for (const key of ['memorycore_distill', 'memorycore_weeklysync', 'kb_git_push', 'zcode_mem_backup',
+                               'kb_backup_check', 'smoke_test', 'syscheck_gate', 'tfssync', 'health_probe']) {
+              const r = db.prepare(`SELECT ts, detail FROM events WHERE kind='dispatch' AND action='run'
+                                    AND detail LIKE ? ORDER BY ts DESC LIMIT 1`).get('[' + key + ']%');
+              if (r) out.metabolism[key] = {ts: fmtTs(r.ts), msg: String(r.detail || '').replace(/^\[[^\]]+\]/, '').slice(0, 140)};
+            }
+            out.sources = db.prepare(`SELECT id,name,sheet,enabled,last_scan_at,last_count FROM sources ORDER BY id`).all();
+          } finally { db.close(); }
+        } catch {}
+        try { out.wxwatch_heart = fmtTs(fs.statSync(WXWATCH_HEART).mtime / 1000); } catch {}
+        liveCache = {ok: true, ...out}; liveAt = Date.now();
+        json(res, 200, liveCache);
+      });
       // 体检对比基线：POST 记录当前快照（打开体检时调用），GET 返回上次快照与现在的 diff。
       // vite 重启后第一次=无基线，第二次打开起有对比。放内存不放盘——体检是"体感"不是台账。
       server.middlewares.use('/api/eco-baseline', (req, res) => {
@@ -554,6 +642,7 @@ function ecosystemPlugin() {
 // server.proxy：所有外部服务只经 /api/platform/* 同源前缀进页面（模块化边界，UI 不认识 8331/8342）：
 //   /api/platform/actions/* → 8331 引擎宿主（task/decide/command/attach/ops 写操作）
 //   /api/platform/task-detail|attach-asset|engine-ping → 8331（任务详情/附件/探活）
+//   /api/platform/engine-overview|engine-workers → 8331（引擎核心：实时队列/完成/告警 + 工作者活跃，生态体检用）
 //   /api/platform/kb-search|kb-health → 8342 检索服务（语义/关键词混合查询）
 
 // enginePlugin：vite 起服务时拉起工作站引擎宿主（web/server.py --engines）作子进程并全程看护。
@@ -573,14 +662,26 @@ function enginePlugin() {
       const out = fs.openSync(path.join(ENGINE_DIR, 'server_stdout.log'), 'a');
       const err = fs.openSync(path.join(ENGINE_DIR, 'server_stderr.log'), 'a');
       let child = null, lastStart = 0, stopped = false;
+      // 拉起前先探 8331：已有活引擎（比如另一个 vite 实例——端口被占退化成"僵尸 vite"也会跑本插件）
+      // 就不拉。Windows 下 http.server SO_REUSEADDR 双绑 8331 能共存，2026-10-21 实测双引擎竞态双过
+      // 单例锁（调度器/闹钟双跑根因）；探活前置把竞态掐死在源头
+      const engineAlive = () => new Promise(res => {
+        const req = http.get('http://127.0.0.1:8331/api/ping', r => { res(r.statusCode === 200); r.resume(); });
+        req.setTimeout(1500, () => { req.destroy(); res(false); });
+        req.on('error', () => res(false));
+      });
       const start = () => {
         lastStart = Date.now();
-        child = spawn(py, ['-X', 'utf8', path.join(ENGINE_DIR, 'server.py'), '--engines'], {
-          cwd: ENGINE_DIR, stdio: ['ignore', out, err], windowsHide: true,
-          env: Object.assign({}, process.env, {PYTHONUNBUFFERED: '1'})
+        engineAlive().then(alive => {
+          if (stopped) return;
+          if (alive) { console.log('[engine] 8331 已有活引擎，本实例不重复拉起'); return; }
+          child = spawn(py, ['-X', 'utf8', path.join(ENGINE_DIR, 'server.py'), '--engines'], {
+            cwd: ENGINE_DIR, stdio: ['ignore', out, err], windowsHide: true,
+            env: Object.assign({}, process.env, {PYTHONUNBUFFERED: '1'})
+          });
+          child.on('exit', code => console.log(`[engine] sidecar 退出 code=${code}`));
+          console.log(`[engine] sidecar 已拉起 pid=${child.pid}`);
         });
-        child.on('exit', code => console.log(`[engine] sidecar 退出 code=${code}`));
-        console.log(`[engine] sidecar 已拉起 pid=${child.pid}`);
       };
       start();
       const timer = setInterval(() => {          // 看护：子进程死了 ≥60s 后重拉，防崩溃环
@@ -613,6 +714,8 @@ export default defineConfig({
       '/api/platform/task-detail': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/task-detail/, '/api/task')},
       '/api/platform/attach-asset': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/attach-asset/, '/attach')},
       '/api/platform/engine-ping': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/engine-ping/, '/api/ping')},
+      '/api/platform/engine-overview': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/engine-overview/, '/api/overview')},
+      '/api/platform/engine-workers': {target: 'http://127.0.0.1:8331', rewrite: p => p.replace(/^\/api\/platform\/engine-workers/, '/api/workers')},
       '/api/platform/kb-search': {target: 'http://127.0.0.1:8342', rewrite: p => p.replace(/^\/api\/platform\/kb-search/, '/search')},
       '/api/platform/kb-ask': {target: 'http://127.0.0.1:8342', rewrite: p => p.replace(/^\/api\/platform\/kb-ask/, '/ask')},
       '/api/platform/kb-health': {target: 'http://127.0.0.1:8342', rewrite: p => p.replace(/^\/api\/platform\/kb-health/, '/healthz')},
