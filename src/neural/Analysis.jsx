@@ -177,7 +177,10 @@ function RelatedSearch({node}) {
     setHits(null);
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 35000);
-    fetch(`/api/platform/kb-search?q=${encodeURIComponent(node.title)}&top=5&rerank=true`, {signal: ctl.signal})
+    // 2026-10-24 查询词标题→text截160字（笔记=标题+正文、任务=标题+备注+来源）：
+    // 纯标题太笼统，召回泛、命中不聚焦（向量库混嵌修复后配套的查询侧优化）
+    const q = String(node.text || node.title).replace(/\s+/g, ' ').trim().slice(0, 160);
+    fetch(`/api/platform/kb-search?q=${encodeURIComponent(q)}&top=5&rerank=true`, {signal: ctl.signal})
       .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
       .then(d => { if (!stop) setHits(d.hits || []); })
       .catch(() => { if (!stop) setHits([]); })
