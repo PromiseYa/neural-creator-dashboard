@@ -1125,7 +1125,7 @@ function Dock({graph, onGo, onAction}) {
       .finally(() => clearTimeout(timer));
     // 2026-10-21：搜索框不只是列片段，要走 /ask 让 LLM 整合资料直接回答（本地 qwen2.5:3b 优先，断VPN回退台达122B）。
     // 片段卡先到(2~3s)，答案卡(gold)随后插到最前(3~8s)。
-    fetch("/api/platform/kb-ask?q=&top=5")
+    fetch(`/api/platform/kb-ask?q=${encodeURIComponent(text)}&top=5`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (!d || !d.answer) return;

@@ -34,6 +34,13 @@ ENGINE_CWD = os.path.dirname(ENGINE_SRV)
 WATCH_INTERVAL = 300          # watch 巡检周期
 ENGINE_HANG_LIMIT = 1         # API 挂起即动手（8s 超时已是本地毫秒级查询的千倍余量，
                               # 挂起=真死锁；连续2轮等待只会拖长恢复，2026-10-23 收紧）
+# Ollama 看护（2026-10-24）：Run 键 Ollama-Serve 只管登录那一刻，进程崩了无人拉，
+# kbserve /ask 的本地 LLM 路就静默失效（当日实证：总结卡半月不出无人知）。纯端口服务
+# 无 db 死锁问题，socket 探活即可；拉起复用官方 start.vbs（OLLAMA_MODELS 固定 D 盘+隐藏窗）。
+OLLAMA_PORT = 11434
+OLLAMA_EXE = r"D:\Portable\Ollama\ollama.exe"
+OLLAMA_MODELS = r"D:\Portable\Ollama\models"
+OLLAMA_LOG = r"D:\Portable\Ollama\serve.log"
 
 
 def alive(port=5173):
@@ -123,6 +130,20 @@ def revive_engine():
     log("engine relaunched by keepalive")
 
 
+def revive_ollama():
+    """11434 不通即直连拉 ollama serve（2026-10-24 实证：官方 start.vbs/wscript 在本机
+    拉不起进程且无任何日志——Run 键 Ollama-Serve 登录自启长期失效即此因；python Popen
+    直连 serve 同环境实测秒起）。幂等：探活通过直接返回；进程在时二次 serve 因端口占用
+    立即退出，无副作用。日志独立落 Ollama 目录，勿混写引擎共用的 vite-keepalive.log。"""
+    if alive(OLLAMA_PORT):
+        return
+    env = dict(os.environ, OLLAMA_MODELS=OLLAMA_MODELS, OLLAMA_KEEP_ALIVE="10m")
+    with open(OLLAMA_LOG, "ab") as out:
+        subprocess.Popen([OLLAMA_EXE, "serve"], env=env,
+                         creationflags=0x08000000, stdout=out, stderr=subprocess.STDOUT)
+    log("ollama down, revived via direct serve")
+
+
 def watch():
     """常驻看护（2026-10-23，Run 键 StarMap-Serve 无参即进此模式，替代已删的
     StarMap-keep 计划任务）：每 5 分钟 vite 端口探活（复用 main 的拉起逻辑）
@@ -131,6 +152,7 @@ def watch():
     hang = 0
     while True:
         main()          # vite 5173：不通拉起（原单跑逻辑，幂等）
+        revive_ollama()  # Ollama 11434：不通拉 start.vbs（2026-10-24，kbserve /ask 依赖）
         if engine_ok():
             hang = 0
         else:
