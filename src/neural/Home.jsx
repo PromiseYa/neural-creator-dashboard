@@ -1081,17 +1081,19 @@ function Dock({graph, onGo, onAction}) {
   const s = useMemo(() => stats(graph), [graph]);
   const [q, setQ] = useState('');
   const [cards, setCards] = useState(null);
-  // 搜索会话（用户令 10-23）：点击搜索框即开会话，结果面板没关（✕/Esc）之前水母和线条
-  // 恒在搜索框之下——此前 .dock:focus-within 一旦失焦（点结果卡/点画布）z 掉回 8，水母层 z=20 又盖上来。
+  // 搜索会话（用户令 10-23，10-25 补时序）：点击搜索框即开会话，结果面板没关（✕/Esc）之前水母和
+  // 线条恒在搜索框之下。ask-open 用派生值 session||cards，勿在 onBlur 里按当刻 cards 单点判断——
+  // chip 打字动画 ~0.6s 后才 setCards、发送按钮 mousedown 先失焦 click 后提交：失焦早于结果落地时
+  // 会话被误杀，面板掉 z=8 被水母层 z=20 盖住（10-25"搜索后点桌面盖顶"案）。
   // blur 时若结果面板还开着，会话保持；没开过结果则直接结束会话。
   const [session, setSession] = useState(false);
   const endSession = () => { setCards(null); setSession(false); };
   useEffect(() => {
-    if (!session) return;
+    if (!session && !cards) return;   // 与 ask-open 同条件：cards 撑着面板时（session 已被 blur 误杀的路径）Esc 也要能关
     const onKey = e => { if (e.key === 'Escape') endSession(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [session]);
+  }, [session, cards]);
   const typing = useRef(null);
   const kbCtl = useRef(null);   // 8342 检索串行化：新查询掐掉上一发（kbserve 并发排队会互相污染时序）
   // 混合查询（10-16 升级三路）：①本地图谱规则卡 ②工作站全域命中卡（任务/拍板/指令/记忆/服务关键词）
@@ -1146,7 +1148,7 @@ function Dock({graph, onGo, onAction}) {
   // 壁纸原生输入回填已上移到 data/live.js 通用通道（星图 10-18 二轮）：所有输入框共用，
   // 本框带 data-wv-submit="form"，LivelyMod 回车提交后自动触发检索
   const kpis = [['内容节点', 'Notes', s.content], ['连接', 'Links', s.links], ['双向共振', 'Mutual', s.mutual], ['未创建', 'Unresolved', s.ghosts]];
-  return <div className={`dock${session ? ' ask-open' : ''}`}>
+  return <div className={`dock${session || cards ? ' ask-open' : ''}`}>
     {cards && <section className="ask-results glass" aria-live="polite">
       <header><span><Icon name="spark" size={14}/>图谱分析 <em>Graph analysis</em></span><small>图谱规则 + KB 混合检索 · Graph + KB search</small><button className="icon-btn" aria-label="关闭分析" onClick={endSession}><Icon name="close" size={14}/></button></header>
       <div className="ask-cards">{cards.list.map((c, i) => <article key={i} className={`ask-card tone-${c.tone}`} style={{animationDelay: i * 90 + 'ms'}}>
